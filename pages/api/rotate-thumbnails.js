@@ -2,8 +2,9 @@ import { supabase } from "../../lib/supabase";
 import { updateYouTubeThumbnail } from "../../lib/youtubeUpdate";
 import { getSession } from "next-auth/react";
 // /pages/api/rotate-youtube-thumbnail.js
-import { getYouTubeClient } from "../../lib/youtubeClient";
+//import { getYouTubeClient } from "../../lib/youtubeClient";
 //import { supabase } from "@/lib/supabase";
+import { getYouTubeClientForUserByEmail } from "../../lib/youtubeClient";
 import fs from "fs";
 import path from "path";
 import axios from "axios";
@@ -34,8 +35,8 @@ export default async function handler(req, res) {
     fs.writeFileSync(tempPath, Buffer.from(response.data));
 
     // Upload to YouTube
-    const youtube = getYouTubeClient();
-
+    //const youtube = getYouTubeClient();
+      const youtube = getYouTubeClientForUserByEmail(email); 
     await youtube.thumbnails.set({
       videoId,
       media: {
