@@ -1,0 +1,44 @@
+{
+  "name": "youtube-ab-test",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:next": "next dev",
+    "build": "next build && npm run build:css",
+    "start": "next start",
+    "build:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --watch",
+    "watch:css": "npx tailwindcss -i ./src/input.css -o ./public/css/output.css --watch",
+    "dev:tailwind": "npx tailwindcss -i ./src/input.css -o ./public/css/output.css --watch",
+    "dev:css": "concurrently \"npm run watch:css\" \"next dev\"",
+    "cron:rotate": "node server/serverCron.js",
+    "cron:analytics": "node server/serverAnalyticsCron.js",
+    "dev:rotate": "node server/scheduler.js",
+    "dev:analytics": "node server/analyticsScheduler.js",
+    "dev:all": "concurrently \"npm run dev:css\" \"npm run dev:tailwind\" \"npm run dev:rotate\" \"npm run dev:analytics\" \"npm run cron:rotate\" \"npm run cron:analytics\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.76.1",
+    "@tailwindcss/forms": "^0.5.3",
+    "axios": "^1.6.0",
+    "dotenv": "^17.2.3",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "framer-motion": "^12.23.24",
+    "googleapis": "^164.1.0",
+    "lucide-react": "^0.552.0",
+    "luxon": "^3.7.2",
+    "next": "^14.2.33",
+    "next-auth": "^4.22.1",
+    "node-cron": "^4.2.1",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "sharp": "^0.34.4"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.18"
+  }
+}

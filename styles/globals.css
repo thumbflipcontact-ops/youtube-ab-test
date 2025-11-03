@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Optional custom global styles */
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+iframe {
+  position: relative;
+  z-index: 0;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-fadeInOut {
+  animation: fadeInOut 15s linear infinite;
+  transition: opacity 1s ease-in-out;
+}
