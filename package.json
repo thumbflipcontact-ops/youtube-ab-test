@@ -3,19 +3,27 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:next": "next dev",
-    "build": "next build && npm run build:css",
+    "dev": "npm run build:css && next dev",
+    "build": "npm run build:css && next build",
     "start": "next start",
-    "build:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --watch",
-    "watch:css": "npx tailwindcss -i ./src/input.css -o ./public/css/output.css --watch",
-    "dev:tailwind": "npx tailwindcss -i ./src/input.css -o ./public/css/output.css --watch",
+
+    // Compile Tailwind CSS once (for production)
+    "build:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --minify",
+
+    // Watch Tailwind CSS changes locally (for dev only)
+    "watch:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --watch",
+
+    // Run dev server + CSS watcher together
     "dev:css": "concurrently \"npm run watch:css\" \"next dev\"",
+
+    // Cron jobs (manual/local triggers)
     "cron:rotate": "node server/serverCron.js",
     "cron:analytics": "node server/serverAnalyticsCron.js",
     "dev:rotate": "node server/scheduler.js",
     "dev:analytics": "node server/analyticsScheduler.js",
-    "dev:all": "concurrently \"npm run dev:css\" \"npm run dev:tailwind\" \"npm run dev:rotate\" \"npm run dev:analytics\" \"npm run cron:rotate\" \"npm run cron:analytics\""
+
+    // Run everything (for local testing)
+    "dev:all": "concurrently \"npm run dev:css\" \"npm run dev:rotate\" \"npm run dev:analytics\" \"npm run cron:rotate\" \"npm run cron:analytics\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.76.1",
