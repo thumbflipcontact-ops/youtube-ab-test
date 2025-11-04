@@ -39,7 +39,7 @@ export default function ABTestForm({ videoId, thumbnails }) {
 
         // Slight delay to allow alert to close before navigation
         setTimeout(() => {
-          router.push("/my-tests")
+          router.reload()
         }, 300)
       } else {
         throw new Error(`Unexpected response: ${response.status}`)
