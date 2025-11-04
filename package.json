@@ -11,7 +11,7 @@
     "build:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --minify",
 
     // Watch Tailwind CSS changes locally (for dev only)
-    "watch:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --watch",
+    "build:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --minify"
 
     // Run dev server + CSS watcher together
     "dev:css": "concurrently \"npm run watch:css\" \"next dev\"",
