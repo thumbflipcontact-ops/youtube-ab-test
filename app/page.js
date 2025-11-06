@@ -52,7 +52,7 @@ export default function HomePage() {
         transition={{ delay: 0.6, duration: 0.5 }}
       >
         <span className="text-gray-300 text-sm md:text-base">
-          Just <span className="text-yellow-300 font-bold text-lg">$17/month</span> — grow like a pro creator.
+          Just <span className="text-yellow-300 font-bold text-lg">1500 INR/month</span> — grow like a pro creator.
         </span>
       </motion.div>
 
