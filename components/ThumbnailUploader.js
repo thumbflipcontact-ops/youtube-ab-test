@@ -13,33 +13,40 @@ export default function ThumbnailUploader({ thumbnails, setThumbnails, videoId }
   }
 
   const handleUpload = async (e) => {
-    const files = Array.from(e.target.files || [])
-    if (!files.length) return;
-    if (files.length + thumbnails.length > 10) {
-      alert("Max 10 thumbnails");
-      return;
-    }
+  const files = Array.from(e.target.files || [])
+  if (!files.length) return;
 
-    const invalid = files.map(validateFile).find(Boolean)
-    if (invalid) { alert(invalid); return }
-
-    setUploading(true)
-    try {
-      const readers = await Promise.all(files.map(f => new Promise((resolve)=>{
-        const r = new FileReader()
-        r.onload = () => resolve(r.result)
-        r.readAsDataURL(f)
-      })))
-      const res = await axios.post("/api/upload", { files: readers, videoId })
-      if (res.data?.urls?.length) setThumbnails([...thumbnails, ...res.data.urls])
-      else alert("No files were uploaded successfully. Check console.")
-    } catch (err) {
-      console.error("Upload error:", err?.response?.data || err.message)
-      alert("Upload failed. See console.")
-    } finally {
-      setUploading(false)
-    }
+  if (files.length + thumbnails.length > 10) {
+    alert("Max 10 thumbnails");
+    return;
   }
+
+  const invalid = files.map(validateFile).find(Boolean)
+  if (invalid) { alert(invalid); return }
+
+  setUploading(true);
+
+  try {
+    const formData = new FormData();
+    files.forEach((f) => formData.append("files", f));
+    formData.append("videoId", videoId);
+
+    const res = await axios.post("/api/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    if (res.data?.urls?.length) {
+      setThumbnails([...thumbnails, ...res.data.urls]);
+    } else {
+      alert("No files uploaded. Check console.");
+    }
+  } catch (err) {
+    console.error("Upload error:", err?.response?.data || err.message);
+    alert("Upload failed. See console.");
+  } finally {
+    setUploading(false);
+  }
+}
 
   return (
    <div className="bg-white shadow rounded-lg p-5 text-green-600">

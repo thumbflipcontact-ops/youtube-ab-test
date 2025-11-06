@@ -4,7 +4,7 @@ import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
 import { DateTime } from "luxon";
 
-console.log("📊 Starting YouTube Analytics Sync (Pacific Time)...");
+console.log("📊 Starting YouTube Analytics Sync (UTC)...");
 
 // ---------------------------
 // 1️⃣ Helper: Create OAuth2 client for a specific user
@@ -49,16 +49,16 @@ async function refreshAccessToken(oauth2Client, email) {
 }
 
 // ---------------------------
-// 3️⃣ Main analytics collection
+// 3️⃣ Main analytics collection (UTC)
 // ---------------------------
 async function fetchABTestAnalytics() {
-  const nowPacific = DateTime.now().setZone("America/Los_Angeles");
-  console.log(`🔍 [${nowPacific.toISO()}] Checking ended A/B tests needing analytics...`);
+  const nowUtc = DateTime.utc();
+  console.log(`🔍 [${nowUtc.toISO()}] Checking ended A/B tests needing analytics...`);
 
-  // Convert Pacific now → UTC ISO string for comparison
-  const nowUTC = nowPacific.toUTC().toISO();
+  // ✅ Compare timestamps in UTC (Supabase stores UTC)
+  const nowUTC = nowUtc.toISO();
 
-  // 🔹 Find tests that ended but aren’t analyzed yet
+  // ✅ Find tests that ended but haven’t been analyzed yet
   const { data: tests, error } = await supabase
     .from("ab_tests")
     .select("*")
@@ -77,7 +77,7 @@ async function fetchABTestAnalytics() {
 
   console.log(`🧮 Found ${tests.length} ended tests.`);
 
-  // Group tests per user to reuse tokens efficiently
+  // ✅ Group tests by user (more efficient token refresh)
   const testsByUser = tests.reduce((acc, test) => {
     acc[test.user_email] = acc[test.user_email] || [];
     acc[test.user_email].push(test);
@@ -87,7 +87,7 @@ async function fetchABTestAnalytics() {
   for (const [user_email, userTests] of Object.entries(testsByUser)) {
     console.log(`👤 Processing analytics for user: ${user_email}`);
 
-    // Get user's refresh token
+    // ✅ Fetch refresh token for the user
     const { data: userData, error: userErr } = await supabase
       .from("app_users")
       .select("refresh_token")
@@ -95,12 +95,13 @@ async function fetchABTestAnalytics() {
       .maybeSingle();
 
     if (userErr || !userData?.refresh_token) {
-      console.warn(`⚠️ No refresh_token for ${user_email}, skipping all their tests.`);
+      console.warn(`⚠️ No refresh_token for ${user_email}, skipping all tests.`);
       continue;
     }
 
     const oauth2Client = getOAuth2Client(userData.refresh_token);
     const accessToken = await refreshAccessToken(oauth2Client, user_email);
+
     if (!accessToken) {
       console.warn(`⚠️ Skipping ${user_email}: unable to refresh access token.`);
       continue;
@@ -111,7 +112,7 @@ async function fetchABTestAnalytics() {
       auth: oauth2Client,
     });
 
-    // Process each test sequentially for this user
+    // ✅ Process all tests sequentially to prevent quota bursts
     for (const test of userTests) {
       const {
         id: ab_test_id,
@@ -126,8 +127,8 @@ async function fetchABTestAnalytics() {
       try {
         const response = await youtubeAnalytics.reports.query({
           ids: "channel==MINE",
-          startDate: DateTime.fromISO(start_datetime).toISODate(),
-          endDate: DateTime.fromISO(end_datetime).toISODate(),
+          startDate: DateTime.fromISO(start_datetime, { zone: "utc" }).toISODate(),
+          endDate: DateTime.fromISO(end_datetime, { zone: "utc" }).toISODate(),
           metrics: "views,estimatedMinutesWatched,averageViewDuration,likes,comments",
           dimensions: "video",
           filters: `video==${video_id}`,
@@ -147,7 +148,7 @@ async function fetchABTestAnalytics() {
           comments,
         ] = row;
 
-        // Avoid duplicates
+        // ✅ Prevent duplicate analytics inserts
         const { data: existing } = await supabase
           .from("thumbnail_performance")
           .select("id")
@@ -156,12 +157,14 @@ async function fetchABTestAnalytics() {
           .limit(1);
 
         if (existing?.length) {
-          console.log(`⏩ Analytics already stored for test ${ab_test_id}, skipping duplicate insert.`);
+          console.log(
+            `⏩ Analytics already stored for test ${ab_test_id}, skipping duplicate insert.`
+          );
           continue;
         }
 
-        // Insert performance data for each thumbnail
-        for (const thumb of thumbnail_urls || []) {
+        // ✅ Store analytics for each thumbnail variant
+        for (const t of thumbnail_urls || []) {
           const { error: insertErr } = await supabase
             .from("thumbnail_performance")
             .insert([
@@ -169,40 +172,43 @@ async function fetchABTestAnalytics() {
                 ab_test_id,
                 video_id,
                 user_email,
-                thumbnail_url: thumb,
+                thumbnail_url: t,
                 views,
                 estimated_minutes_watched: estimatedMinutesWatched,
                 average_view_duration: averageViewDuration,
                 likes,
                 comments,
-                collected_at: new Date().toISOString(),
+                collected_at: DateTime.utc().toISO(),
               },
             ]);
 
-          if (insertErr)
-            console.error(`❌ Insert failed for ${thumb}:`, insertErr.message);
-          else
-            console.log(`✅ Stored analytics for thumbnail ${thumb}`);
+          if (insertErr) {
+            console.error(`❌ Insert failed for ${t}:`, insertErr.message);
+          } else {
+            console.log(`✅ Stored analytics for thumbnail ${t}`);
+          }
         }
 
-        // Mark test as analyzed
+        // ✅ Mark test as analyzed
         await supabase
           .from("ab_tests")
           .update({ analytics_collected: true })
           .eq("id", ab_test_id);
 
         console.log(`🏁 Test ${ab_test_id} marked as analytics_collected ✅`);
+
       } catch (err) {
         const message = err?.errors?.[0]?.message || err.message;
         console.error(`❌ YouTube API error for test ${ab_test_id}: ${message}`);
 
-        if (message?.includes("quota") || message?.includes("Rate Limit")) {
+        // ✅ Handle quota slowdown
+        if (message?.toLowerCase().includes("quota") || message?.includes("Rate Limit")) {
           console.warn("⏳ Pausing sync for 10 minutes due to quota limit...");
           await sleep(10 * 60 * 1000);
         }
       }
 
-      // Small delay to protect against quota bursts
+      // ✅ Small delay to avoid hitting API too fast
       await sleep(3000);
     }
   }

@@ -1,95 +1,91 @@
+import nextConnect from "next-connect";
+import multer from "multer";
 import { supabase } from "../../lib/supabase";
 
-// Increase body parser limit for multiple large base64 images
 export const config = {
   api: {
-    bodyParser: {
-      sizeLimit: "1gb", // adjust depending on max file count/size
-    },
+    bodyParser: false, // ❗ REQUIRED for multer
   },
 };
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    console.warn("Method not allowed:", req.method);
-    return res.status(405).json({ message: "Method not allowed" });
-  }
+// Multer stores files in memory
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB max per file
+  },
+});
 
+const apiRoute = nextConnect({
+  onError(error, req, res) {
+    console.error("❌ Upload API Error:", error);
+    res.status(501).json({ error: `Upload error: ${error.message}` });
+  },
+  onNoMatch(req, res) {
+    res.status(405).json({ error: `Method ${req.method} not allowed` });
+  },
+});
+
+// Accept multiple images
+apiRoute.use(upload.array("files"));
+
+apiRoute.post(async (req, res) => {
   try {
-    const { files, videoId } = req.body; // files = array of base64 strings
-    if (!files || !videoId) {
-      console.warn("Missing files or videoId");
-      return res.status(400).json({ message: "Missing files or videoId" });
+    const videoId = req.body.videoId;
+    if (!videoId) {
+      return res.status(400).json({ error: "Missing videoId" });
+    }
+
+    const files = req.files;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "No files uploaded" });
     }
 
     const uploadedUrls = [];
 
     for (let i = 0; i < files.length; i++) {
-      try {
-        // Detect MIME type dynamically
-        const mimeMatch = files[i].match(/^data:(image\/\w+);base64,/);
-        if (!mimeMatch) throw new Error("Invalid file format");
-        const mimeType = mimeMatch[1]; // "image/jpeg" or "image/png"
-        const extension = mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1];
+      const file = files[i];
 
-        const base64Data = files[i].replace(/^data:image\/\w+;base64,/, "");
-        const buffer = Buffer.from(base64Data, "base64");
+      const extension = file.mimetype.split("/")[1];
+      const filename = `uploads/${videoId}_${Date.now()}_${i}.${extension}`;
 
-        // Store in uploads/ folder
-        const filename = `uploads/${videoId}_${Date.now()}_${i}.${extension}`;
+      console.log(`📤 Uploading ${filename} (${file.size} bytes)`);
 
-        console.log(`[Upload] Uploading file: ${filename} (size: ${buffer.length} bytes)`);
+      const { data, error } = await supabase.storage
+        .from("thumbnails")
+        .upload(filename, file.buffer, {
+          contentType: file.mimetype,
+        });
 
-        const { data, error } = await supabase.storage
-          .from("thumbnails")
-          .upload(filename, buffer, { contentType: mimeType });
-
-        if (error) {
-          console.error(`[Upload] Supabase upload error for ${filename}:`, error);
-          throw error;
-        }
-
-        // Get public URL
-        const { data: publicData, error: urlError } = supabase.storage
-          .from("thumbnails")
-          .getPublicUrl(filename);
-
-        if (urlError) {
-          console.error(`[Upload] Supabase public URL error for ${filename}:`, urlError);
-          throw urlError;
-        }
-
-        const publicUrl = publicData.publicUrl;
-
-        console.log(`[Upload] File uploaded successfully: ${publicUrl}`);
-        uploadedUrls.push(publicUrl);
-
-        // Insert into thumbnails_meta table
-        const { error: dbError } = await supabase
-          .from("thumbnails_meta")
-          .insert([{ video_id: videoId, url: publicUrl }]);
-
-        if (dbError) {
-          console.error(`[Upload] Failed to insert metadata for ${filename}:`, dbError);
-        } else {
-          console.log(`[Upload] Metadata saved for ${filename}`);
-        }
-
-      } catch (fileError) {
-        console.error(`[Upload] Failed to upload file index ${i}:`, fileError);
+      if (error) {
+        console.error("❌ Supabase upload error:", error);
+        continue;
       }
+
+      const { data: publicData } = supabase.storage
+        .from("thumbnails")
+        .getPublicUrl(filename);
+
+      const publicUrl = publicData.publicUrl;
+      uploadedUrls.push(publicUrl);
+
+      // Save metadata
+      await supabase.from("thumbnails_meta").insert([
+        { video_id: videoId, url: publicUrl },
+      ]);
+
+      console.log(`✅ Uploaded: ${publicUrl}`);
     }
 
     if (uploadedUrls.length === 0) {
-      console.warn("[Upload] No files were uploaded successfully");
-      return res.status(500).json({ message: "No files were uploaded. Check console for details." });
+      return res.status(500).json({ error: "Upload failed for all files" });
     }
 
     res.status(200).json({ urls: uploadedUrls });
-  } catch (error) {
-    console.error("[Upload] Handler error:", error);
-    res.status(500).json({ message: "Upload failed. Check server console for details." });
+  } catch (err) {
+    console.error("❌ Upload Handler Error:", err);
+    res.status(500).json({ error: "Server failed to upload files" });
   }
-}
+});
 
-
+export default apiRoute;

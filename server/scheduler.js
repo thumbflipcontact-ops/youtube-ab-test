@@ -5,7 +5,7 @@ import { exec } from "child_process";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabase.js";
 
-console.log("🕒 Smart Scheduler started (Pacific Time)...");
+console.log("🕒 Smart Scheduler started (UTC Time)...");
 
 // --- Store active jobs so we don’t duplicate ---
 const activeJobs = new Map();
@@ -29,10 +29,10 @@ function getCronExpression(value, unit) {
 }
 
 /**
- * 🧠 Fetch currently active A/B tests (Pacific Time)
+ * 🧠 Fetch currently active A/B tests (UTC)
  */
 async function fetchActiveTests() {
-  const nowPacific = DateTime.now().setZone("America/Los_Angeles");
+  const nowUtc = DateTime.utc();
 
   const { data, error } = await supabase
     .from("ab_tests")
@@ -45,18 +45,18 @@ async function fetchActiveTests() {
     return [];
   }
 
-  // 🕓 Filter in JS based on Pacific time
+  // 🕓 Filter in JS based on UTC
   return (
     data?.filter((t) => {
-      const start = DateTime.fromISO(t.start_datetime).setZone("America/Los_Angeles");
-      const end = DateTime.fromISO(t.end_datetime).setZone("America/Los_Angeles");
-      return nowPacific >= start && nowPacific <= end;
+      const start = DateTime.fromISO(t.start_datetime, { zone: "utc" });
+      const end = DateTime.fromISO(t.end_datetime, { zone: "utc" });
+      return nowUtc >= start && nowUtc <= end;
     }) || []
   );
 }
 
 /**
- * 🌀 Schedule or cancel rotations dynamically
+ * 🌀 Schedule or cancel rotations dynamically (UTC)
  */
 async function refreshRotations() {
   console.log("🔁 Checking for active A/B tests...");
@@ -91,8 +91,8 @@ async function refreshRotations() {
     const job = cron.schedule(
       cronExp,
       () => {
-        const nowPacific = DateTime.now().setZone("America/Los_Angeles").toISO();
-        console.log(`🔁 [${nowPacific}] Rotating thumbnails for video ${video_id} (test ${id})...`);
+        const nowUtcIso = DateTime.utc().toISO();
+        console.log(`🔁 [${nowUtcIso}] Rotating thumbnails for video ${video_id} (test ${id})...`);
         exec(`node server/serverCron.js ${video_id}`, (error) => {
           if (error) {
             console.error(`❌ Rotation failed for video ${video_id}:`, error);
@@ -101,7 +101,7 @@ async function refreshRotations() {
           }
         });
       },
-      { timezone: "America/Los_Angeles" } // ✅ ensure cron runs in Pacific time
+      { timezone: "UTC" } // ✅ ensure cron runs in UTC
     );
 
     activeJobs.set(id, job);
@@ -111,18 +111,18 @@ async function refreshRotations() {
 }
 
 /**
- * 📈 Daily analytics at 00:00 Pacific
+ * 📈 Daily analytics at 00:00 UTC
  */
 function scheduleDailyAnalytics() {
-  const pacificMidnight = "0 0 * * *";
+  const utcMidnight = "0 0 * * *";
 
-  console.log("📊 Scheduling daily analytics at 00:00 Pacific...");
+  console.log("📊 Scheduling daily analytics at 00:00 UTC...");
 
   cron.schedule(
-    pacificMidnight,
+    utcMidnight,
     () => {
-      const nowPacific = DateTime.now().setZone("America/Los_Angeles").toISO();
-      console.log(`🌙 [${nowPacific}] Running YouTube analytics sync...`);
+      const nowUtcIso = DateTime.utc().toISO();
+      console.log(`🌙 [${nowUtcIso}] Running YouTube analytics sync...`);
 
       exec("node server/serverAnalyticsCron.js", (error, stdout, stderr) => {
         if (error) {
@@ -133,15 +133,15 @@ function scheduleDailyAnalytics() {
         if (stderr) console.error(stderr);
       });
     },
-    { timezone: "America/Los_Angeles" }
+    { timezone: "UTC" }
   );
 }
 
 /**
- * 🚀 Start the scheduler
+ * 🚀 Start the scheduler (UTC)
  */
 async function startScheduler() {
-  console.log("🚀 Starting Dynamic Scheduler...");
+  console.log("🚀 Starting Dynamic Scheduler (UTC)...");
 
   // Run immediately at launch
   await refreshRotations();
@@ -150,17 +150,17 @@ async function startScheduler() {
   cron.schedule(
     "*/5 * * * *",
     async () => {
-      const nowPacific = DateTime.now().setZone("America/Los_Angeles").toISO();
-      console.log(`🔄 [${nowPacific}] Refreshing rotation schedule (every 5 min)...`);
+      const nowUtcIso = DateTime.utc().toISO();
+      console.log(`🔄 [${nowUtcIso}] Refreshing rotation schedule (every 5 min)...`);
       await refreshRotations();
     },
-    { timezone: "America/Los_Angeles" }
+    { timezone: "UTC" }
   );
 
   // Daily analytics
   scheduleDailyAnalytics();
 
-  console.log("✅ Scheduler setup complete (Pacific Time).");
+  console.log("✅ Scheduler setup complete (UTC).");
 }
 
 startScheduler();

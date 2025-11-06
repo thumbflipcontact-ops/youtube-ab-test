@@ -10,7 +10,7 @@ import cron from "node-cron";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabase.js";
 
-console.log("🕒 Thumbnail rotation cron started (Pacific Time)...");
+console.log("🕒 Thumbnail rotation cron started (UTC Time)...");
 
 // -------------------------------------------------
 // 1️⃣ Helper: Convert interval to milliseconds
@@ -121,7 +121,7 @@ async function rotateThumbnail(videoId, imageUrl, oauth2Client) {
 // -------------------------------------------------
 async function processABTests() {
   console.log("🔍 Checking active A/B tests...");
-  const now = DateTime.now().setZone("America/Los_Angeles");
+  const now = DateTime.utc();
 
   const { data: tests, error } = await supabase
     .from("ab_tests")
@@ -147,10 +147,10 @@ async function processABTests() {
       user_email,
     } = test;
 
-    const start = DateTime.fromISO(start_datetime).setZone("America/Los_Angeles");
-    const end = DateTime.fromISO(end_datetime).setZone("America/Los_Angeles");
+    const start = DateTime.fromISO(start_datetime, { zone: "utc" });
+    const end = DateTime.fromISO(end_datetime, { zone: "utc" });
     const lastRotation = last_rotation_time
-      ? DateTime.fromISO(last_rotation_time).setZone("America/Los_Angeles")
+      ? DateTime.fromISO(last_rotation_time, { zone: "utc" })
       : null;
 
     if (now < start) {
