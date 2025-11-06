@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "npm run build:css && next dev",
-    "build": "npm run build:css && next build",
+    "build": "npm run build:css && next build && next-sitemap",
     "start": "next start",
     "build:css": "npx tailwindcss -i ./src/input.css -o ./public/css/style.css --minify",
     "dev:css": "concurrently \"npm run watch:css\" \"next dev\"",
@@ -28,6 +28,7 @@
     "luxon": "^3.7.2",
     "next": "^14.2.33",
     "next-auth": "^4.22.1",
+    "next-sitemap": "^4.2.3",
     "node-cron": "^4.2.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",
