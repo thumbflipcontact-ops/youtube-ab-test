@@ -1,7 +1,7 @@
 // app/api/tests/user/route.js
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import handler from "../../auth/[...nextauth]/route";
+import { authOptions } from "../../auth/authOptions";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 
 export async function GET() {
