@@ -1,0 +1,9 @@
+# *
+User-agent: *
+Allow: /
+
+# Host
+Host: https://thumbflip.co
+
+# Sitemaps
+Sitemap: https://thumbflip.co/sitemap.xml
