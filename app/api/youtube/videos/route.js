@@ -1,12 +1,10 @@
-// app/api/youtube/videos/route.js
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import handler from "../../auth/[...nextauth]/route";
+import { authOptions } from "../../auth/authOptions";
 import { getYouTubeVideos } from "../../../../lib/youtubeApi";
 
 export async function GET() {
   try {
-    // ✅ Use App Router session
     const session = await getServerSession(authOptions);
 
     if (!session) {
@@ -25,7 +23,6 @@ export async function GET() {
       );
     }
 
-    // ✅ Fetch YouTube videos using your helper
     const videos = await getYouTubeVideos(accessToken);
 
     return NextResponse.json(videos, {

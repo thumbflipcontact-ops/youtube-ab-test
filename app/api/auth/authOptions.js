@@ -1,14 +1,12 @@
-import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Initialize Supabase Admin (server-only)
+// Initialize Supabase Admin
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ Refresh Google Access Token
 async function refreshAccessToken(token) {
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -37,8 +35,7 @@ async function refreshAccessToken(token) {
   }
 }
 
-// ✅ NextAuth Options
-const authOptions = {
+export const authOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
@@ -87,7 +84,6 @@ const authOptions = {
       return session;
     },
 
-    // ✅ Save user in Supabase using service role
     async signIn({ user, account }) {
       try {
         if (account?.refresh_token) {
@@ -115,7 +111,3 @@ const authOptions = {
     },
   },
 };
-
-// ✅ App Router handler
-const handler = NextAuth(authOptions);
-export { handler as GET, handler as POST };
