@@ -6,29 +6,77 @@ import { useState } from "react";
 
 export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }) {
   const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState({}); // { filename: percent }
+
+  const MAX_THUMBNAILS = 10;
+  const MAX_FILE_SIZE_MB = 2;
+  const ACCEPTED_FORMATS = ["jpg", "jpeg", "png", "gif", "bmp"];
 
   const handleUpload = async (e) => {
-    const files = e.target.files;
+    let files = Array.from(e.target.files);
     if (!files || files.length === 0) return;
+
+    // ✅ 1. Check thumbnail count limit
+    if (thumbnails.length >= MAX_THUMBNAILS) {
+      alert(`You already have ${MAX_THUMBNAILS} thumbnails.`);
+      return;
+    }
+
+    // ✅ 2. Filter out files > 2MB or invalid formats
+    const validFiles = [];
+    const rejectedMessages = [];
+
+    files.forEach((file) => {
+      const ext = file.name.split(".").pop().toLowerCase();
+
+      // ❌ Invalid format
+      if (!ACCEPTED_FORMATS.includes(ext)) {
+        rejectedMessages.push(`❌ ${file.name} is not an accepted format.`);
+        return;
+      }
+
+      // ❌ Too large
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        rejectedMessages.push(`❌ ${file.name} is larger than 2MB.`);
+        return;
+      }
+
+      validFiles.push(file);
+    });
+
+    // ✅ Show alert for rejected files
+    if (rejectedMessages.length > 0) {
+      alert(rejectedMessages.join("\n"));
+    }
+
+    // ✅ No valid files? Stop here
+    if (validFiles.length === 0) return;
+
+    // ✅ 3. Enforce max 10 thumbnails TOTAL
+    if (thumbnails.length + validFiles.length > MAX_THUMBNAILS) {
+      alert(
+        `You can only upload ${MAX_THUMBNAILS} thumbnails total. ` +
+          `You currently have ${thumbnails.length}.`
+      );
+      return;
+    }
 
     setLoading(true);
 
-    // ✅ PARALLEL UPLOADS (SUPER FAST)
-    const uploadPromises = Array.from(files).map(async (file, index) => {
+    // ✅ 4. Upload all valid thumbnails in parallel
+    const uploadPromises = validFiles.map(async (file, index) => {
       const ext = file.name.split(".").pop();
       const filename = `uploads/${videoId}_${Date.now()}_${index}.${ext}`;
 
-      // ✅ Track local preview instantly (OPTIONAL)
+      // ✅ Local preview instantly
       const localPreview = URL.createObjectURL(file);
       setThumbnails((prev) => [...prev, localPreview]);
 
-      // ✅ Upload the file to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      // ✅ Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
         .from("thumbnails")
         .upload(filename, file, {
           cacheControl: "3600",
-          upsert: false
+          upsert: false,
         });
 
       if (uploadError) {
@@ -36,19 +84,19 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
         throw uploadError;
       }
 
-      // ✅ Get public URL
+      // ✅ Get public Supabase URL
       const { data: publicData } = supabase.storage
         .from("thumbnails")
         .getPublicUrl(filename);
 
       const publicUrl = publicData.publicUrl;
 
-      // ✅ Replace local URL with the real Supabase URL
+      // ✅ Replace local preview with real URL
       setThumbnails((prev) =>
         prev.map((thumb) => (thumb === localPreview ? publicUrl : thumb))
       );
 
-      // ✅ Save metadata
+      // ✅ Save metadata to your DB
       await fetch("/api/save-thumbnail-meta", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -58,7 +106,6 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
       return publicUrl;
     });
 
-    // ✅ Wait for ALL uploads to finish (parallel)
     try {
       await Promise.all(uploadPromises);
     } catch (err) {
@@ -66,18 +113,29 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
     }
 
     setLoading(false);
-    setProgress({});
   };
 
   return (
     <div className="border p-4 rounded-lg">
-      <input type="file" multiple onChange={handleUpload} />
+      <input
+        type="file"
+        multiple
+        onChange={handleUpload}
+        disabled={thumbnails.length >= MAX_THUMBNAILS}
+      />
+
+      {/* Max limit reached */}
+      {thumbnails.length >= MAX_THUMBNAILS && (
+        <p className="text-red-600 text-sm mt-2">
+          You have reached the maximum of {MAX_THUMBNAILS} thumbnails.
+        </p>
+      )}
 
       {loading && (
         <p className="mt-3 text-sm text-gray-600">Uploading thumbnails…</p>
       )}
 
-      {/* ✅ PREVIEW — live thumbnails */}
+      {/* ✅ Thumbnail previews */}
       {thumbnails.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-3">
           {thumbnails.map((url, index) => (
