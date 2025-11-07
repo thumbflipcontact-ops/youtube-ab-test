@@ -1,15 +1,15 @@
-// /api/auth/[...nextauth].js
+// app/api/auth/[...nextauth]/route.js
 import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { createClient } from "@supabase/supabase-js";
 
-// --- Initialize Supabase admin client ---
+// ✅ Initialize Supabase Admin (server-only)
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// --- Helper: refresh expired Google access tokens ---
+// ✅ Refresh Google Access Token
 async function refreshAccessToken(token) {
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -26,21 +26,19 @@ async function refreshAccessToken(token) {
     const refreshedTokens = await response.json();
     if (!response.ok) throw refreshedTokens;
 
-    console.log(`🔁 Refreshed Google access token for ${token.email || "user"}`);
-
     return {
       ...token,
       accessToken: refreshedTokens.access_token,
-      accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000, // 1 hour
-      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken, // keep old if new one not returned
+      accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000,
+      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
     };
   } catch (error) {
-    console.error("❌ Error refreshing access token:", error);
+    console.error("❌ Error refreshing Google access token:", error);
     return { ...token, error: "RefreshAccessTokenError" };
   }
 }
 
-// --- NextAuth configuration ---
+// ✅ NextAuth Options (unchanged)
 export const authOptions = {
   providers: [
     GoogleProvider({
@@ -56,7 +54,7 @@ export const authOptions = {
             "https://www.googleapis.com/auth/youtube.upload",
             "https://www.googleapis.com/auth/yt-analytics.readonly",
           ].join(" "),
-          access_type: "offline", // get refresh_token
+          access_type: "offline",
           prompt: "consent",
         },
       },
@@ -66,11 +64,7 @@ export const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
 
   callbacks: {
-    /**
-     * 🧠 Handles JWT creation and token refresh
-     */
     async jwt({ token, account, user }) {
-      // Initial sign-in
       if (account && user) {
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
@@ -80,18 +74,11 @@ export const authOptions = {
         return token;
       }
 
-      // Still valid
-      if (Date.now() < token.accessTokenExpires) {
-        return token;
-      }
+      if (Date.now() < token.accessTokenExpires) return token;
 
-      // Expired → refresh
       return await refreshAccessToken(token);
     },
 
-    /**
-     * 💾 Add token fields to session
-     */
     async session({ session, token }) {
       session.accessToken = token.accessToken;
       session.refreshToken = token.refreshToken;
@@ -101,31 +88,28 @@ export const authOptions = {
       return session;
     },
 
-    /**
-     * 🔐 Save refresh_token & user info to Supabase
-     */
+    // ✅ Save user in Supabase using service role
     async signIn({ user, account }) {
       try {
         if (account?.refresh_token) {
-          const { error } = await supabaseAdmin
-            .from("app_users")
-            .upsert(
-              {
-                email: user.email,
-                name: user.name,
-                image: user.image,
-                google_id: account.providerAccountId,
-                refresh_token: account.refresh_token,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: ["email"] }
-            );
+          const { error } = await supabaseAdmin.from("app_users").upsert(
+            {
+              email: user.email,
+              name: user.name,
+              image: user.image,
+              google_id: account.providerAccountId,
+              refresh_token: account.refresh_token,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: ["email"] }
+          );
 
           if (error) throw error;
-          console.log(`✅ Saved/updated user in Supabase: ${user.email}`);
+
+          console.log(`✅ Saved/updated Supabase user: ${user.email}`);
         }
       } catch (err) {
-        console.error("❌ Failed to save user in Supabase:", err);
+        console.error("❌ Failed to save user:", err);
       }
 
       return true;
@@ -133,4 +117,6 @@ export const authOptions = {
   },
 };
 
-export default NextAuth(authOptions);
+// ✅ App Router handler
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
