@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "../../../lib/supabase";
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
 export async function POST(req) {
   try {
     const formData = await req.formData();
@@ -26,7 +20,6 @@ export async function POST(req) {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
 
