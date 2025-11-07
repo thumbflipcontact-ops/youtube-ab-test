@@ -6,6 +6,7 @@ import { useState } from "react";
 
 export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }) {
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState({}); // { filename: percent }
 
   const handleUpload = async (e) => {
     const files = e.target.files;
@@ -13,27 +14,26 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
 
     setLoading(true);
 
-    const newUrls = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
-      // Build filename
+    // ✅ PARALLEL UPLOADS (SUPER FAST)
+    const uploadPromises = Array.from(files).map(async (file, index) => {
       const ext = file.name.split(".").pop();
-      const filename = `uploads/${videoId}_${Date.now()}_${i}.${ext}`;
+      const filename = `uploads/${videoId}_${Date.now()}_${index}.${ext}`;
 
-      // ✅ Upload to Supabase
+      // ✅ Track local preview instantly (OPTIONAL)
+      const localPreview = URL.createObjectURL(file);
+      setThumbnails((prev) => [...prev, localPreview]);
+
+      // ✅ Upload the file to Supabase Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from("thumbnails")
         .upload(filename, file, {
           cacheControl: "3600",
-          upsert: false,
+          upsert: false
         });
 
       if (uploadError) {
         console.error("Upload error:", uploadError);
-        setLoading(false);
-        return;
+        throw uploadError;
       }
 
       // ✅ Get public URL
@@ -42,7 +42,11 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
         .getPublicUrl(filename);
 
       const publicUrl = publicData.publicUrl;
-      newUrls.push(publicUrl);
+
+      // ✅ Replace local URL with the real Supabase URL
+      setThumbnails((prev) =>
+        prev.map((thumb) => (thumb === localPreview ? publicUrl : thumb))
+      );
 
       // ✅ Save metadata
       await fetch("/api/save-thumbnail-meta", {
@@ -50,11 +54,19 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ videoId, url: publicUrl }),
       });
+
+      return publicUrl;
+    });
+
+    // ✅ Wait for ALL uploads to finish (parallel)
+    try {
+      await Promise.all(uploadPromises);
+    } catch (err) {
+      console.error("Upload error:", err);
     }
 
-    // ✅ Add thumbnails to parent state (will re-render)
-    setThumbnails([...thumbnails, ...newUrls]);
     setLoading(false);
+    setProgress({});
   };
 
   return (
@@ -62,19 +74,20 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
       <input type="file" multiple onChange={handleUpload} />
 
       {loading && (
-        <p className="mt-3 text-sm text-gray-600">Uploading…</p>
+        <p className="mt-3 text-sm text-gray-600">Uploading thumbnails…</p>
       )}
 
-      {/* ✅ Preview thumbnails */}
+      {/* ✅ PREVIEW — live thumbnails */}
       {thumbnails.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-3">
           {thumbnails.map((url, index) => (
-            <img
-              key={index}
-              src={url}
-              className="w-20 h-20 object-cover rounded border"
-              alt={`Thumbnail ${index + 1}`}
-            />
+            <div key={index} className="relative">
+              <img
+                src={url}
+                className="w-20 h-20 object-cover rounded border"
+                alt={`Thumbnail ${index + 1}`}
+              />
+            </div>
           ))}
         </div>
       )}
