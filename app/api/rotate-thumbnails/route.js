@@ -1,48 +1,105 @@
 // app/api/rotate-thumbnails/route.js
 import { NextResponse } from "next/server";
 import axios from "axios";
+import { DateTime } from "luxon";
+import { supabase } from "../../../lib/supabase";
 import { getYouTubeClientForUserByEmail } from "../../../lib/youtubeClient";
 
-export async function POST(req) {
-  try {
-    const body = await req.json();
-    const { email, videoId, imageUrl } = body;
+const CRON_SECRET = process.env.CRON_SECRET; // ✅ set this in Vercel & cron-job.org
 
-    if (!email || !videoId || !imageUrl) {
-      return NextResponse.json(
-        { message: "Missing email, videoId or imageUrl" },
-        { status: 400 }
-      );
+export async function GET(req) {
+  // ✅ 1. Security check
+  const headerSecret = req.headers.get("x-cron-secret");
+  if (!headerSecret || headerSecret !== CRON_SECRET) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    console.log("⏱️ Cron triggered → Checking tests...");
+
+    // ✅ 2. Get current UTC time
+    const nowUTC = DateTime.now().toUTC().toISO();
+
+    // ✅ 3. Fetch tests that need rotation
+    const { data: tests, error } = await supabase
+      .from("ab_tests")
+      .select("*")
+      .lte("next_run_time", nowUTC)
+      .eq("analytics_collected", false);
+
+    if (error) {
+      console.error("❌ DB Error:", error);
+      return NextResponse.json({ message: "DB error" }, { status: 500 });
     }
 
-    // ✅ Get authenticated YouTube client with refreshed tokens
-    const { youtube } = await getYouTubeClientForUserByEmail(email);
+    if (!tests || tests.length === 0) {
+      console.log("✅ No tests due for rotation.");
+      return NextResponse.json({ rotated: 0 });
+    }
 
-    // ✅ Download the thumbnail to memory
-    const response = await axios.get(imageUrl, {
-      responseType: "arraybuffer",
-    });
+    console.log(`🔍 Found ${tests.length} tests requiring rotation.`);
 
-    // ✅ Upload to YouTube using Data API
-    await youtube.thumbnails.set({
-      videoId,
-      media: {
-        mimeType: "image/jpeg",
-        body: Buffer.from(response.data),
-      },
-    });
+    let rotatedCount = 0;
 
-    console.log(`✅ Rotated thumbnail for ${videoId} → ${imageUrl}`);
+    // ✅ 4. Process each test
+    for (const test of tests) {
+      const {
+        id,
+        video_id,
+        thumbnail_urls,
+        current_index,
+        rotation_interval_value,
+        rotation_interval_unit,
+        user_email,
+      } = test;
 
-    return NextResponse.json(
-      { success: true, newThumbnail: imageUrl },
-      { status: 200 }
-    );
+      if (!thumbnail_urls || thumbnail_urls.length === 0) {
+        console.warn(`⚠️ No thumbnails for test ${id}`);
+        continue;
+      }
+
+      // ✅ Pick next thumbnail
+      const nextIndex = (current_index + 1) % thumbnail_urls.length;
+      const nextThumbnail = thumbnail_urls[nextIndex];
+
+      console.log(`🔄 Rotating video ${video_id} → ${nextThumbnail}`);
+
+      // ✅ Get authenticated YouTube client
+      const { youtube } = await getYouTubeClientForUserByEmail(user_email);
+
+      // ✅ Download thumbnail as buffer
+      const imageResp = await axios.get(nextThumbnail, {
+        responseType: "arraybuffer",
+      });
+
+      // ✅ Upload new thumbnail
+      await youtube.thumbnails.set({
+        videoId: video_id,
+        media: {
+          mimeType: "image/jpeg",
+          body: Buffer.from(imageResp.data),
+        },
+      });
+
+      // ✅ Compute next rotation time
+      let nextTime = DateTime.now().toUTC();
+      nextTime = nextTime.plus({ [rotation_interval_unit]: rotation_interval_value });
+
+      // ✅ Update DB state
+      await supabase
+        .from("ab_tests")
+        .update({
+          current_index: nextIndex,
+          last_rotation_time: DateTime.now().toUTC().toISO(),
+          next_run_time: nextTime.toISO(),
+        })
+        .eq("id", id);
+
+      console.log(`✅ Test ${id} rotated successfully.`);
+
+      rotatedCount++;
+    }
+
+    return NextResponse.json({ success: true, rotated: rotatedCount });
   } catch (err) {
-    console.error("❌ Thumbnail rotation failed:", err.message);
-    return NextResponse.json(
-      { message: err.message },
-      { status: 500 }
-    );
-  }
-}
+    console.error("❌
