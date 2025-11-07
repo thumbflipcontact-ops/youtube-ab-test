@@ -1,9 +1,16 @@
 // app/api/my-tests/route.js
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/authOptions";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 
+// ✅ FINAL GET — Only ONE
 export async function GET() {
   try {
     // ✅ Authenticate user (App Router)
@@ -18,7 +25,7 @@ export async function GET() {
 
     const userEmail = session.user.email;
 
-    // ✅ Use service-role client (safe, bypasses RLS)
+    // ✅ Use service-role client (bypasses RLS safely)
     const { data, error } = await supabaseAdmin
       .from("ab_tests")
       .select("id, video_id, start_datetime, end_datetime, analytics_collected")

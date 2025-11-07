@@ -1,4 +1,9 @@
-// app/api/rotate-thumbnails/route.js
+// ✅ These must always be at the TOP before any imports
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
 import { NextResponse } from "next/server";
 import axios from "axios";
 import { DateTime } from "luxon";
@@ -8,6 +13,7 @@ import { getYouTubeClientForUserByEmail } from "../../../lib/youtubeClient";
 const CRON_SECRET = process.env.CRON_SECRET;
 
 export async function GET(req) {
+  // ✅ Security check
   const headerSecret = req.headers.get("x-cron-secret");
   if (!headerSecret || headerSecret !== CRON_SECRET) {
     return NextResponse.json(
@@ -61,11 +67,11 @@ export async function GET(req) {
       const nextIndex = (current_index + 1) % thumbnail_urls.length;
       const nextThumbnail = thumbnail_urls[nextIndex];
 
-      console.log("Rotating video " + video_id + " to " + nextThumbnail);
+      console.log("Rotating video " + video_id + " → " + nextThumbnail);
 
       const { youtube } = await getYouTubeClientForUserByEmail(user_email);
 
-      const imageResp = await axios.get(nextThumbnail, {
+      const img = await axios.get(nextThumbnail, {
         responseType: "arraybuffer"
       });
 
@@ -73,7 +79,7 @@ export async function GET(req) {
         videoId: video_id,
         media: {
           mimeType: "image/jpeg",
-          body: Buffer.from(imageResp.data)
+          body: Buffer.from(img.data)
         }
       });
 
@@ -92,7 +98,7 @@ export async function GET(req) {
         .eq("id", id);
 
       rotatedCount++;
-      console.log("Rotation completed for test " + id);
+      console.log("✅ Rotation completed for test " + id);
     }
 
     return NextResponse.json(
@@ -100,7 +106,7 @@ export async function GET(req) {
       { status: 200 }
     );
   } catch (err) {
-    console.error("Rotation error:", err.message);
+    console.error("❌ Rotation error:", err.message);
     return NextResponse.json(
       { message: err.message },
       { status: 500 }

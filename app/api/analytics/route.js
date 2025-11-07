@@ -1,13 +1,19 @@
 // app/api/analytics/route.js
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/authOptions";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 
-// ✅ GET analytics
+// ✅ GET analytics results for a specific test
 export async function GET(req) {
   try {
-    // 🔒 Authentication
+    // ✅ Authenticate user
     const session = await getServerSession(authOptions);
 
     if (!session || !session.user?.email) {
@@ -17,7 +23,7 @@ export async function GET(req) {
 
     const userEmail = session.user.email;
 
-    // ✅ Extract testId from URL
+    // ✅ Extract testId from URL query
     const { searchParams } = new URL(req.url);
     const testId = searchParams.get("testId");
 
@@ -28,11 +34,10 @@ export async function GET(req) {
       );
     }
 
-    // ✅ Fetch analytics using Supabase admin (bypasses RLS safely)
+    // ✅ Fetch analytics from Supabase
     const { data, error } = await supabaseAdmin
       .from("thumbnail_performance")
-      .select(
-        `
+      .select(`
         id,
         ab_test_id,
         video_id,
@@ -43,13 +48,15 @@ export async function GET(req) {
         likes,
         comments,
         collected_at
-        `
-      )
+      `)
       .eq("user_email", userEmail)
       .eq("ab_test_id", testId)
       .order("collected_at", { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error("❌ Supabase error:", error);
+      throw error;
+    }
 
     return NextResponse.json({ success: true, data }, { status: 200 });
   } catch (err) {

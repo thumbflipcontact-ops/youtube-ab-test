@@ -1,4 +1,10 @@
 // app/api/tests/user/route.js
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/authOptions";
@@ -6,7 +12,7 @@ import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 
 export async function GET() {
   try {
-    // ✅ Authentication (App Router)
+    // ✅ Authenticate user
     const session = await getServerSession(authOptions);
 
     if (!session || !session.user?.email) {
@@ -18,7 +24,7 @@ export async function GET() {
 
     const userEmail = session.user.email;
 
-    // ✅ Use Supabase admin client (bypass RLS safely)
+    // ✅ Use Supabase admin client to bypass RLS (safe)
     const { data, error } = await supabaseAdmin
       .from("ab_tests")
       .select(
@@ -39,7 +45,7 @@ export async function GET() {
   } catch (err) {
     console.error("❌ Error:", err);
     return NextResponse.json(
-      { message: "Server error", error: err.message },
+      { message: err.message || "Server error" },
       { status: 500 }
     );
   }
