@@ -15,6 +15,7 @@ export async function POST(req) {
     }
 
     const userEmail = session.user.email;
+    const nextRunUTC = DateTime.fromISO(start_datetime).toUTC().toISO();
 
     // ✅ Parse JSON body
     const body = await req.json();
@@ -93,6 +94,7 @@ export async function POST(req) {
           rotation_interval_unit: rotation_interval_unit || "minutes",
           current_index: 0,
           last_rotation_time: null,
+          next_run_time: nextRunUTC,
           analytics_collected: false,
           user_email: userEmail,
         },
