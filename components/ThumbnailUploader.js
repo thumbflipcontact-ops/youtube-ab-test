@@ -22,7 +22,7 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
       const ext = file.name.split(".").pop();
       const filename = `uploads/${videoId}_${Date.now()}_${i}.${ext}`;
 
-      // ✅ Upload directly to Supabase Storage
+      // ✅ Upload to Supabase
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from("thumbnails")
         .upload(filename, file, {
@@ -44,7 +44,7 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
       const publicUrl = publicData.publicUrl;
       newUrls.push(publicUrl);
 
-      // ✅ Save metadata to DB via tiny API route
+      // ✅ Save metadata
       await fetch("/api/save-thumbnail-meta", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -52,7 +52,7 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
       });
     }
 
-    // Add new thumbnails into parent state
+    // ✅ Add thumbnails to parent state (will re-render)
     setThumbnails([...thumbnails, ...newUrls]);
     setLoading(false);
   };
@@ -60,7 +60,24 @@ export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }
   return (
     <div className="border p-4 rounded-lg">
       <input type="file" multiple onChange={handleUpload} />
-      {loading && <p className="mt-2 text-sm text-gray-600">Uploading…</p>}
+
+      {loading && (
+        <p className="mt-3 text-sm text-gray-600">Uploading…</p>
+      )}
+
+      {/* ✅ Preview thumbnails */}
+      {thumbnails.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          {thumbnails.map((url, index) => (
+            <img
+              key={index}
+              src={url}
+              className="w-20 h-20 object-cover rounded border"
+              alt={`Thumbnail ${index + 1}`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
