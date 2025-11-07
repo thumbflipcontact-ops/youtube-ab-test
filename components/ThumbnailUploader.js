@@ -1,84 +1,66 @@
-'use client'
-import { useState } from 'react'
-import axios from 'axios'
+// components/ThumbnailUploader.js
+"use client";
 
-export default function ThumbnailUploader({ thumbnails, setThumbnails, videoId }) {
-  const [uploading, setUploading] = useState(false)
+import { supabase } from "@/lib/supabaseClient";
+import { useState } from "react";
 
-  const validateFile = (file) => {
-    const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/bmp", "image/gif"];
-    if (!allowed.includes(file.type)) return "Unsupported file type";
-    if (file.size > 2 * 1024 * 1024) return "File must be <= 2 MB";
-    return null;
-  }
+export default function ThumbnailUploader({ videoId, thumbnails, setThumbnails }) {
+  const [loading, setLoading] = useState(false);
 
   const handleUpload = async (e) => {
-  const files = Array.from(e.target.files || [])
-  if (!files.length) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-  if (files.length + thumbnails.length > 10) {
-    alert("Max 10 thumbnails");
-    return;
-  }
+    setLoading(true);
 
-  const invalid = files.map(validateFile).find(Boolean)
-  if (invalid) { alert(invalid); return }
+    const newUrls = [];
 
-  setUploading(true);
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
 
-  try {
-    const formData = new FormData();
-    files.forEach((f) => formData.append("files", f));
-    formData.append("videoId", videoId);
+      // Build filename
+      const ext = file.name.split(".").pop();
+      const filename = `uploads/${videoId}_${Date.now()}_${i}.${ext}`;
 
-    const res = await axios.post("/api/upload", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+      // ✅ Upload directly to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("thumbnails")
+        .upload(filename, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
 
-    if (res.data?.urls?.length) {
-      setThumbnails([...thumbnails, ...res.data.urls]);
-    } else {
-      alert("No files uploaded. Check console.");
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        setLoading(false);
+        return;
+      }
+
+      // ✅ Get public URL
+      const { data: publicData } = supabase.storage
+        .from("thumbnails")
+        .getPublicUrl(filename);
+
+      const publicUrl = publicData.publicUrl;
+      newUrls.push(publicUrl);
+
+      // ✅ Save metadata to DB via tiny API route
+      await fetch("/api/save-thumbnail-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId, url: publicUrl }),
+      });
     }
-  } catch (err) {
-    console.error("Upload error:", err?.response?.data || err.message);
-    alert("Upload failed. See console.");
-  } finally {
-    setUploading(false);
-  }
-}
+
+    // Add new thumbnails into parent state
+    setThumbnails([...thumbnails, ...newUrls]);
+    setLoading(false);
+  };
 
   return (
-   <div className="bg-white shadow rounded-lg p-5 text-green-600">
-  <label className="text-xl font-bold mb-3">
-    Upload Thumbnails <span className="text-green-500 text-sm">(max 10)</span>
-  </label>
-
-  <input
-    type="file"
-    accept="image/*"
-    multiple
-    onChange={handleUpload}
-    disabled={uploading}
-    className="block w-full border border-gray-300 rounded-md p-2 text-sm cursor-pointer hover:border-gray-400"
-  />
-
-  {uploading && (
-    <p className="mt-2 text-sm text-blue-600 animate-pulse">
-      Uploading...
-    </p>
-  )}
-
-  <div className="grid grid-cols-5 gap-3 mt-4">
-  {thumbnails.map((t, i) => (
-    <img
-      key={i}
-      src={t}
-      alt={`thumb-${i}`}
-      className="w-20 h-20 object-cover rounded-md border shadow-sm"
-    />
-  ))}
-</div>
-</div>
-  )
+    <div className="border p-4 rounded-lg">
+      <input type="file" multiple onChange={handleUpload} />
+      {loading && <p className="mt-2 text-sm text-gray-600">Uploading…</p>}
+    </div>
+  );
 }
