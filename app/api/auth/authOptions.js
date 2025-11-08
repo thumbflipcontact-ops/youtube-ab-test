@@ -1,12 +1,12 @@
 import GoogleProvider from "next-auth/providers/google";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase Admin
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ✅ Refresh expired Google token
 async function refreshAccessToken(token) {
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -20,17 +20,17 @@ async function refreshAccessToken(token) {
       }),
     });
 
-    const refreshedTokens = await response.json();
-    if (!response.ok) throw refreshedTokens;
+    const refreshed = await response.json();
+    if (!response.ok) throw refreshed;
 
     return {
       ...token,
-      accessToken: refreshedTokens.access_token,
-      accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000,
-      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
+      accessToken: refreshed.access_token,
+      accessTokenExpires: Date.now() + refreshed.expires_in * 1000,
+      refreshToken: refreshed.refresh_token ?? token.refreshToken,
     };
-  } catch (error) {
-    console.error("❌ Error refreshing Google access token:", error);
+  } catch (e) {
+    console.error("❌ Error refreshing Google token", e);
     return { ...token, error: "RefreshAccessTokenError" };
   }
 }
@@ -60,54 +60,60 @@ export const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
 
   callbacks: {
-    async jwt({ token, account, user }) {
+    async jwt({ token, user, account }) {
+      // ✅ On first login
       if (account && user) {
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        token.accessTokenExpires = Date.now() + account.expires_in * 1000;
-        token.email = user.email;
-        token.name = user.name;
-        return token;
-      }
+        // 1. Check Supabase for existing user
+        const { data: existing } = await supabaseAdmin
+          .from("app_users")
+          .select("id")
+          .eq("email", user.email)
+          .maybeSingle();
 
-      if (Date.now() < token.accessTokenExpires) return token;
+        let userId;
 
-      return await refreshAccessToken(token);
-    },
-
-    async session({ session, token }) {
-      session.accessToken = token.accessToken;
-      session.refreshToken = token.refreshToken;
-      session.user.email = token.email;
-      session.user.name = token.name;
-      session.error = token.error;
-      return session;
-    },
-
-    async signIn({ user, account }) {
-      try {
-        if (account?.refresh_token) {
-          const { error } = await supabaseAdmin.from("app_users").upsert(
-            {
+        if (existing) {
+          userId = existing.id;
+        } else {
+          // 2. Create record
+          const { data: created } = await supabaseAdmin
+            .from("app_users")
+            .insert({
               email: user.email,
               name: user.name,
               image: user.image,
               google_id: account.providerAccountId,
               refresh_token: account.refresh_token,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: ["email"] }
-          );
+            })
+            .select("id")
+            .single();
 
-          if (error) throw error;
-
-          console.log(`✅ Saved/updated Supabase user: ${user.email}`);
+          userId = created.id;
         }
-      } catch (err) {
-        console.error("❌ Failed to save user:", err);
+
+        token.userId = userId;              // ✅ CRITICAL FIX
+        token.accessToken = account.access_token;
+        token.refreshToken = account.refresh_token;
+        token.accessTokenExpires = Date.now() + account.expires_in * 1000;
+        token.email = user.email;
+
+        return token;
       }
 
-      return true;
+      // ✅ Use existing token if still valid
+      if (Date.now() < token.accessTokenExpires) return token;
+
+      // ✅ Refresh expired token
+      return refreshAccessToken(token);
+    },
+
+    async session({ session, token }) {
+      session.user.id = token.userId;     // ✅ CRITICAL FIX
+      session.user.email = token.email;
+      session.accessToken = token.accessToken;
+      session.refreshToken = token.refreshToken;
+      session.error = token.error;
+      return session;
     },
   },
 };
