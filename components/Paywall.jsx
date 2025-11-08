@@ -19,9 +19,10 @@ export function PaywallButton({ children, onActivated }) {
     setBusy(true);
 
     try {
-      // ✅ 1. Create subscription
+      // ✅ 1. Create subscription WITH COOKIES
       const cs = await fetch("/api/billing/create-subscription", {
         method: "POST",
+        credentials: "include",        // ✅ FIXED
       });
 
       if (!cs.ok) {
@@ -41,15 +42,16 @@ export function PaywallButton({ children, onActivated }) {
         theme: { color: "#0ea5e9" },
 
         handler: async (response) => {
-          // ✅ 3. Verify payment
+          // ✅ 3. Verify payment WITH COOKIES
           const verify = await fetch("/api/billing/verify-checkout", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",     // ✅ FIXED
             body: JSON.stringify(response),
           });
 
           if (verify.ok) {
-            // ✅ 4. Immediately continue your operation
+            // ✅ 4. Immediately continue user action
             if (typeof onActivated === "function") {
               await onActivated();
             }

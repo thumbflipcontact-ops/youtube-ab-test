@@ -1,37 +1,46 @@
-import { supabase } from "../../../../lib/supabaseClient";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/authOptions";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { supabase } from "../../../../lib/supabaseClient";
 import crypto from "crypto";
 
 export async function POST(req) {
   try {
+    // ✅ Require authenticated user
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userEmail = session.user.email;
-    const body = await req.json();
+    const userId = session.user.id;
 
+    // ✅ Parse Razorpay response body
+    const body = await req.json();
     const {
       razorpay_payment_id,
       razorpay_subscription_id,
       razorpay_signature,
     } = body;
 
-    if (!razorpay_payment_id || !razorpay_subscription_id || !razorpay_signature) {
+    if (
+      !razorpay_payment_id ||
+      !razorpay_subscription_id ||
+      !razorpay_signature
+    ) {
       return NextResponse.json(
         { error: "Missing required Razorpay fields" },
         { status: 400 }
       );
     }
 
+    // ✅ Verify Razorpay signature
     const secret = process.env.RAZORPAY_KEY_SECRET;
-
-    const dataToSign =
-      razorpay_payment_id + "|" + razorpay_subscription_id;
+    const dataToSign = `${razorpay_payment_id}|${razorpay_subscription_id}`;
 
     const expectedSignature = crypto
       .createHmac("sha256", secret)
@@ -43,13 +52,20 @@ export async function POST(req) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
     }
 
-    // ✅ Signature is valid — mark subscription active
-    await supabaseAdmin
+    // ✅ Signature is valid — activate subscription
+    const { error } = await supabaseAdmin
       .from("subscriptions")
       .update({
         status: "active",
+        razorpay_subscription_id,
+        updated_at: new Date().toISOString(),
       })
-      .eq("user_email", userEmail);
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("❌ Supabase update error:", error);
+      return NextResponse.json({ error: "Database error" }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {
