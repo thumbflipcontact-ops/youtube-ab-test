@@ -31,12 +31,12 @@ export async function POST() {
       });
     }
 
-    // ✅ Create subscription — correct Razorpay format
+    // ✅ Create subscription — OPTION B: count-based plan
     const subscription = await razorpay.subscriptions.create({
       plan_id: process.env.RAZORPAY_PLAN_ID,
       customer_notify: 1,
       quantity: 1,
-      total_count: 0, // ✅ infinite recurring subscription
+      total_count: 1, // ✅ Count-based (must be >=1)
       notes: { email },
     });
 
