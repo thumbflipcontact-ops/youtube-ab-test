@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { supabase } from "../../../lib/supabaseClient";
-import { getRazorpay } from "../../../lib/razorpay";
+import { supabase } from "../../../../lib/supabaseClient";
+import { getRazorpay } from "../../../../lib/razorpay";
 
 export async function POST() {
   const { data: { user } } = await supabase.auth.getUser();

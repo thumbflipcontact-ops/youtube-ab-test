@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { supabase } from "../../../lib/supabaseClient";
+import { supabase } from "../../../../lib/supabaseClient";
 
 export async function POST(req) {
   const { data: { user } } = await supabase.auth.getUser();

@@ -3,8 +3,8 @@
 import { useState } from "react";
 import axios from "axios";
 import { useSession } from "next-auth/react";
-import { PaywallButton } from "@/components/Paywall";
-import { useSubscription } from "@/hooks/useSubscription";
+import { PaywallButton } from "./Paywall";
+import { useSubscription } from "../hooks/useSubscription";
 
 export default function ABTestForm({ videoId, thumbnails }) {
   const { data: session } = useSession();
