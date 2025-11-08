@@ -9,10 +9,11 @@ import { authOptions } from "../../auth/authOptions";
 export async function POST() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const userId = session.user.id;
     const email = session.user.email;
     const razorpay = getRazorpay();
 
@@ -20,7 +21,7 @@ export async function POST() {
     const { data: existing } = await supabaseAdmin
       .from("subscriptions")
       .select("razorpay_subscription_id, status")
-      .eq("user_email", email)
+      .eq("user_id", userId)
       .maybeSingle();
 
     if (existing && ["active", "past_due", "paused"].includes(existing.status)) {
@@ -30,12 +31,12 @@ export async function POST() {
       });
     }
 
-    // ✅ Razorpay subscription – NO currency field
+    // ✅ Create subscription — correct Razorpay format
     const subscription = await razorpay.subscriptions.create({
       plan_id: process.env.RAZORPAY_PLAN_ID,
       customer_notify: 1,
       quantity: 1,
-      total_count: null, // ongoing subscription
+      total_count: 0, // ✅ infinite recurring subscription
       notes: { email },
     });
 
@@ -43,10 +44,10 @@ export async function POST() {
     await supabaseAdmin
       .from("subscriptions")
       .upsert({
-        user_email: email,
+        user_id: userId,
         plan_id: process.env.RAZORPAY_PLAN_ID,
         razorpay_subscription_id: subscription.id,
-        status: subscription.status || "created",
+        status: subscription.status ?? "created",
       });
 
     return NextResponse.json({ subscriptionId: subscription.id });
@@ -55,7 +56,7 @@ export async function POST() {
     return NextResponse.json(
       {
         error: "Failed to create subscription",
-        details: error.message || error,
+        details: error?.error?.description || error.message,
       },
       { status: 500 }
     );
