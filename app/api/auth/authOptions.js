@@ -1,17 +1,17 @@
 import GoogleProvider from "next-auth/providers/google";
 import { createClient } from "@supabase/supabase-js";
 
+// ✅ Supabase Admin
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ Refresh expired Google token
 async function refreshAccessToken(token) {
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         client_id: process.env.GOOGLE_CLIENT_ID,
         client_secret: process.env.GOOGLE_CLIENT_SECRET,
@@ -29,8 +29,8 @@ async function refreshAccessToken(token) {
       accessTokenExpires: Date.now() + refreshed.expires_in * 1000,
       refreshToken: refreshed.refresh_token ?? token.refreshToken,
     };
-  } catch (e) {
-    console.error("❌ Error refreshing Google token", e);
+  } catch (err) {
+    console.error("❌ Error refreshing token:", err);
     return { ...token, error: "RefreshAccessTokenError" };
   }
 }
@@ -60,10 +60,9 @@ export const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
 
   callbacks: {
-    async jwt({ token, user, account }) {
-      // ✅ On first login
+    async jwt({ token, account, user }) {
       if (account && user) {
-        // 1. Check Supabase for existing user
+        // ✅ 1. Check or create Supabase user
         const { data: existing } = await supabaseAdmin
           .from("app_users")
           .select("id")
@@ -75,7 +74,6 @@ export const authOptions = {
         if (existing) {
           userId = existing.id;
         } else {
-          // 2. Create record
           const { data: created } = await supabaseAdmin
             .from("app_users")
             .insert({
@@ -91,27 +89,31 @@ export const authOptions = {
           userId = created.id;
         }
 
-        token.userId = userId;              // ✅ CRITICAL FIX
+        // ✅ STORE userId IN TOKEN
+        token.userId = userId;
+
+        // ✅ Google OAuth tokens
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
         token.accessTokenExpires = Date.now() + account.expires_in * 1000;
-        token.email = user.email;
 
+        token.email = user.email;
         return token;
       }
 
-      // ✅ Use existing token if still valid
       if (Date.now() < token.accessTokenExpires) return token;
 
-      // ✅ Refresh expired token
       return refreshAccessToken(token);
     },
 
     async session({ session, token }) {
-      session.user.id = token.userId;     // ✅ CRITICAL FIX
+      // ✅ EXPOSE userId TO SESSION
+      session.user.id = token.userId;
       session.user.email = token.email;
+
       session.accessToken = token.accessToken;
       session.refreshToken = token.refreshToken;
+
       session.error = token.error;
       return session;
     },
