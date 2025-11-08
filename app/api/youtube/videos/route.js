@@ -1,3 +1,7 @@
+// ✅ Mark this route as dynamic so Next.js will not try to statically optimize it
+export const dynamic = "force-dynamic";
+export const fetchCache = "default-no-store";
+
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/authOptions";
@@ -23,6 +27,7 @@ export async function GET() {
       );
     }
 
+    // ✅ This is dynamic — allowed now
     const videos = await getYouTubeVideos(accessToken);
 
     return NextResponse.json(videos, {
