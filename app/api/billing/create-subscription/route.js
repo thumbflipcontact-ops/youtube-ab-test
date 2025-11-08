@@ -30,17 +30,16 @@ export async function POST() {
       });
     }
 
-    // ✅ Correct Razorpay subscription payload
+    // ✅ Razorpay subscription – NO currency field
     const subscription = await razorpay.subscriptions.create({
       plan_id: process.env.RAZORPAY_PLAN_ID,
       customer_notify: 1,
       quantity: 1,
-      total_count: null, // ✅ ongoing subscription
-      currency: "INR",   // ✅ Razorpay only supports INR
+      total_count: null, // ongoing subscription
       notes: { email },
     });
 
-    // ✅ Save/update subscription in Supabase
+    // ✅ Save to Supabase
     await supabaseAdmin
       .from("subscriptions")
       .upsert({
@@ -53,7 +52,6 @@ export async function POST() {
     return NextResponse.json({ subscriptionId: subscription.id });
   } catch (error) {
     console.error("Razorpay Subscription Error:", error);
-
     return NextResponse.json(
       {
         error: "Failed to create subscription",
