@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { authOptions } from "../../auth/[...nextauth]/route";
+import { authOptions } from "../../auth/authOptions";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
