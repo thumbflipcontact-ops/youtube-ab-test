@@ -9,11 +9,21 @@ export default function ManageSubscriptionPage() {
   const router = useRouter();
 
   async function loadSubscription() {
-    setLoading(true);
-    const res = await fetch("/api/billing/status", { cache: "no-store" });
-    const json = await res.json();
-    setSub(json);
-    setLoading(false);
+    try {
+      setLoading(true);
+      const res = await fetch("/api/billing/status", {
+        cache: "no-store",
+        credentials: "include",
+      });
+
+      const json = await res.json();
+      setSub(json);
+    } catch (err) {
+      console.error("Failed to load subscription:", err);
+      setSub(null);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -23,18 +33,30 @@ export default function ManageSubscriptionPage() {
   async function cancelSubscription() {
     if (!confirm("Are you sure you want to cancel your subscription?")) return;
 
-    const res = await fetch("/api/billing/cancel", { method: "POST" });
-    const json = await res.json();
+    try {
+      const res = await fetch("/api/billing/cancel", {
+        method: "POST",
+        credentials: "include",
+      });
 
-    if (json.success) {
-      alert("Subscription canceled successfully.");
-      router.push("/dashboard");
-    } else {
-      console.error(json);
-      alert("Failed to cancel subscription. Please contact support.");
+      const json = await res.json();
+
+      if (json.success) {
+        alert("Subscription canceled successfully.");
+        router.push("/dashboard");
+      } else {
+        console.error(json);
+        alert("Failed to cancel subscription. Please contact support.");
+      }
+    } catch (err) {
+      console.error("Cancel error:", err);
+      alert("Error contacting server.");
     }
   }
 
+  // ----------------------------------------
+  // ✅ Loading state
+  // ----------------------------------------
   if (loading) {
     return (
       <div className="p-10 text-center">
@@ -43,10 +65,14 @@ export default function ManageSubscriptionPage() {
     );
   }
 
+  // ----------------------------------------
+  // ✅ No subscription
+  // ----------------------------------------
   if (!sub?.subscribed) {
     return (
       <div className="p-10 text-center">
         <h1 className="text-xl font-bold mb-4">No Active Subscription</h1>
+
         <button
           onClick={() => router.push("/dashboard")}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
@@ -57,29 +83,34 @@ export default function ManageSubscriptionPage() {
     );
   }
 
+  // ----------------------------------------
+  // ✅ Active subscription view (Razorpay or PayPal)
+  // ----------------------------------------
   return (
     <div className="p-10 max-w-xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Manage Subscription</h1>
 
       <div className="border rounded-lg p-6 bg-white shadow">
         <p className="text-gray-700 mb-3">
-          <strong>Status:</strong> {sub.subscribed ? "Active ✅" : "Inactive ❌"}
+          <strong>Status:</strong> Active ✅
         </p>
 
         <p className="text-gray-700 mb-3">
-          <strong>Provider:</strong> {sub.provider.toUpperCase()}
+          <strong>Provider:</strong> {sub.provider?.toUpperCase() || "Unknown"}
         </p>
 
         {sub.provider === "razorpay" && (
           <p className="text-gray-700 mb-3 break-all">
-            <strong>Razorpay Subscription ID:</strong><br />
+            <strong>Razorpay Subscription ID:</strong>
+            <br />
             {sub.razorpay_subscription_id}
           </p>
         )}
 
         {sub.provider === "paypal" && (
           <p className="text-gray-700 mb-3 break-all">
-            <strong>PayPal Subscription ID:</strong><br />
+            <strong>PayPal Subscription ID:</strong>
+            <br />
             {sub.paypal_subscription_id}
           </p>
         )}
