@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { authOptions } from "../../auth/authOptions";
-import { getUserIdFromSession } from "../../../../lib/userIdFromSession";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { paypalCreateSubscription } from "../../../../lib/paypal";
 

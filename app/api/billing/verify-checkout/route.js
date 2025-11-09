@@ -6,7 +6,6 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/authOptions"; 
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { supabase } from "../../../../lib/supabaseClient";
-import { getUserIdFromSession } from "../../../../lib/userIdFromSession";
 import crypto from "crypto";
 
 export async function POST(req) {
