@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { useSession } from "next-auth/react";
-import { PaywallButton } from "./Paywall";
-import { useSubscription } from "../hooks/useSubscription";
+import PaywallUnified from "./PaywallUnified"; // ✅ new unified paywall
 
-export default function ABTestForm({ videoId, thumbnails }) {
+export default function ABTestForm({ videoId, thumbnails, userCountry }) {
   const { data: session } = useSession();
-  const { status: subStatus, loading: subLoading } = useSubscription();
+
+  const [subscribed, setSubscribed] = useState(false);
+  const [subLoading, setSubLoading] = useState(true);
 
   const [startDatetime, setStartDatetime] = useState("");
   const [endDatetime, setEndDatetime] = useState("");
@@ -16,15 +17,31 @@ export default function ABTestForm({ videoId, thumbnails }) {
   const [intervalUnit, setIntervalUnit] = useState("hours");
   const [saving, setSaving] = useState(false);
 
+  // ✅ Fetch subscription status on mount
+  async function refreshSubscription() {
+    setSubLoading(true);
+    try {
+      const res = await fetch("/api/billing/status", { cache: "no-store" });
+      const json = await res.json();
+      setSubscribed(json.subscribed === true);
+    } catch (e) {
+      console.error("Failed loading subscription status:", e);
+    }
+    setSubLoading(false);
+  }
+
+  useEffect(() => {
+    refreshSubscription();
+  }, []);
+
   const toUTC = (localDateTime) => new Date(localDateTime).toISOString();
 
-  // ✅ This is the SAME logic you already had – now reusable.
+  // ✅ SAME LOGIC YOU ALREADY HAD
   const createRotationSchedule = async () => {
     if (!startDatetime || !endDatetime) {
       alert("⚠️ Please choose both start and end date & time.");
       return;
     }
-
     if (parseInt(intervalValue) <= 0) {
       alert("⚠️ Interval must be greater than 0.");
       return;
@@ -54,7 +71,7 @@ export default function ABTestForm({ videoId, thumbnails }) {
       const response = await axios.post("/api/ab-test", payload);
 
       if (response.status === 200 || response.status === 201) {
-        alert("✅ Thumbnail Rotation Schedule created successfully!");
+        alert("✅ Thumbnail Rotation Schedule created successfully! Will be reflected on the YouTube video within 5 minutes from now!");
       } else {
         throw new Error(response.status);
       }
@@ -115,25 +132,39 @@ export default function ABTestForm({ videoId, thumbnails }) {
         </div>
       </div>
 
-      {/* ✅ MAIN BUTTON LOGIC */}
+      {/* ✅ MAIN LOGIC */}
       {subLoading ? (
         <button className="bg-gray-300 px-4 py-2 rounded" disabled>
           Checking subscription...
         </button>
-      ) : subStatus === "active" ? (
-        // ✅ Already subscribed — run rotation immediately
-        <button
-          onClick={createRotationSchedule}
-          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded mt-3"
-          disabled={saving}
-        >
-          {saving ? "Saving..." : "Create Thumbnail Rotation Schedule"}
-        </button>
+      ) : subscribed ? (
+        <>
+          {/* ✅ Manage Subscription Link */}
+          <div className="mb-3">
+            <a
+              href="/billing/manage"
+              className="underline text-blue-600 hover:text-blue-800 text-sm"
+            >
+              Manage Subscription
+            </a>
+          </div>
+
+          <button
+            onClick={createRotationSchedule}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Create Thumbnail Rotation Schedule"}
+          </button>
+        </>
       ) : (
-        // ✅ Not subscribed — open Paywall, then run rotation automatically
-        <PaywallButton onActivated={createRotationSchedule}>
-          Subscribe to unlock & create schedule
-        </PaywallButton>
+        <PaywallUnified
+          userCountry={userCountry}
+          onActivated={() => {
+            refreshSubscription();      // refresh after payment
+            createRotationSchedule();   // auto-create schedule
+          }}
+        />
       )}
     </div>
   );
