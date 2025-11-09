@@ -16,7 +16,7 @@ export async function POST() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // ✅ Already subscribed check
+    // ✅ Already subscribed?
     const { data: existing } = await supabaseAdmin
       .from("subscriptions")
       .select("status, provider, razorpay_subscription_id")
@@ -26,37 +26,36 @@ export async function POST() {
     if (existing?.status === "active" && existing.provider === "razorpay") {
       return NextResponse.json({
         subscriptionId: existing.razorpay_subscription_id,
-        already_active: true
+        already_active: true,
       });
     }
 
     const rz = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
 
-    // ✅ DO NOT PASS currency
+    // ✅ Test mode fix: total_count must be >=1
     const subscription = await rz.subscriptions.create({
       plan_id: process.env.RAZORPAY_PLAN_ID,
       customer_notify: 1,
       quantity: 1,
-      total_count: 0,
-      notes: { user_id: userId }
+      total_count: 1, // ✅ IMPORTANT: Test mode requirement
+      notes: { user_id: userId },
     });
 
-    // ✅ Save subscription (initially inactive)
     await supabaseAdmin.from("subscriptions").upsert({
       user_id: userId,
       provider: "razorpay",
       plan_id: process.env.RAZORPAY_PLAN_ID,
       razorpay_subscription_id: subscription.id,
-      status: "inactive"
+      status: "inactive",
     });
 
     return NextResponse.json({ subscriptionId: subscription.id });
 
   } catch (err) {
     console.error("❌ Error in create-subscription:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
