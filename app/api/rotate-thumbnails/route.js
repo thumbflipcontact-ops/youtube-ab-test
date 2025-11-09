@@ -1,4 +1,4 @@
-// ✅ These must always be at the TOP before any imports
+// ✅ Must be at the top
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -10,11 +10,16 @@ import { DateTime } from "luxon";
 import { supabase } from "../../../lib/supabase";
 import { getYouTubeClientForUserByEmail } from "../../../lib/youtubeClient";
 
-const CRON_SECRET = process.env.CRON_SECRET;
+// ✅ Normalize secret (remove spaces, force lowercase)
+const CRON_SECRET = (process.env.CRON_SECRET || "").trim().toLowerCase();
 
 export async function GET(req) {
-  // ✅ Security check
-  const headerSecret = req.headers.get("x-cron-secret");
+  // ✅ Read header safely and normalize
+  const headerSecret = (req.headers.get("x-cron-secret") || "")
+    .trim()
+    .toLowerCase();
+
+  // ✅ Secure comparison
   if (!headerSecret || headerSecret !== CRON_SECRET) {
     return NextResponse.json(
       { message: "Unauthorized" },
@@ -23,7 +28,7 @@ export async function GET(req) {
   }
 
   try {
-    console.log("Cron triggered. Checking tests...");
+    console.log("✅ Cron triggered. Checking tests...");
 
     const nowUTC = DateTime.now().toUTC().toISO();
 
@@ -34,15 +39,12 @@ export async function GET(req) {
       .eq("analytics_collected", false);
 
     if (error) {
-      console.error("Database error:", error);
-      return NextResponse.json(
-        { message: "Database error" },
-        { status: 500 }
-      );
+      console.error("❌ Database error:", error);
+      return NextResponse.json({ message: "Database error" }, { status: 500 });
     }
 
     if (!tests || tests.length === 0) {
-      console.log("No tests due for rotation.");
+      console.log("ℹ️ No tests due for rotation.");
       return NextResponse.json({ rotated: 0 });
     }
 
@@ -60,32 +62,31 @@ export async function GET(req) {
       } = test;
 
       if (!thumbnail_urls || thumbnail_urls.length === 0) {
-        console.warn("Skipping test " + id + ": no thumbnails.");
+        console.warn(`Skipping test ${id}: no thumbnails.`);
         continue;
       }
 
       const nextIndex = (current_index + 1) % thumbnail_urls.length;
       const nextThumbnail = thumbnail_urls[nextIndex];
 
-      console.log("Rotating video " + video_id + " → " + nextThumbnail);
+      console.log(`🔄 Rotating video ${video_id} → ${nextThumbnail}`);
 
       const { youtube } = await getYouTubeClientForUserByEmail(user_email);
 
       const img = await axios.get(nextThumbnail, {
-        responseType: "arraybuffer"
+        responseType: "arraybuffer",
       });
 
       await youtube.thumbnails.set({
         videoId: video_id,
         media: {
           mimeType: "image/jpeg",
-          body: Buffer.from(img.data)
-        }
+          body: Buffer.from(img.data),
+        },
       });
 
-      let nextTime = DateTime.now().toUTC();
-      nextTime = nextTime.plus({
-        [rotation_interval_unit]: rotation_interval_value
+      let nextTime = DateTime.now().toUTC().plus({
+        [rotation_interval_unit]: rotation_interval_value,
       });
 
       await supabase
@@ -93,12 +94,12 @@ export async function GET(req) {
         .update({
           current_index: nextIndex,
           last_rotation_time: DateTime.now().toUTC().toISO(),
-          next_run_time: nextTime.toISO()
+          next_run_time: nextTime.toISO(),
         })
         .eq("id", id);
 
       rotatedCount++;
-      console.log("✅ Rotation completed for test " + id);
+      console.log(`✅ Rotation completed for test ${id}`);
     }
 
     return NextResponse.json(
@@ -106,9 +107,9 @@ export async function GET(req) {
       { status: 200 }
     );
   } catch (err) {
-    console.error("❌ Rotation error:", err.message);
+    console.error("❌ Rotation error:", err);
     return NextResponse.json(
-      { message: err.message },
+      { message: "Server error" },
       { status: 500 }
     );
   }
