@@ -2,35 +2,76 @@
 
 import { useEffect, useState } from "react";
 
-function loadRazorpayOnce() {
-  if (typeof window === "undefined") return;
-  if (document.getElementById("razorpay-checkout-js")) return;
+// ✅ Safe loader with initialization guarantee
+async function loadRazorpayScript() {
+  if (typeof window === "undefined") return false;
 
-  const script = document.createElement("script");
-  script.id = "razorpay-checkout-js";
-  script.src = "https://checkout.razorpay.com/v1/checkout.js";
-  script.async = true;
-  document.head.appendChild(script);
+  return new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+
+    const existing = document.getElementById("razorpay-checkout-js");
+    if (existing) {
+      existing.onload = () => resolve(true);
+      existing.onerror = () => resolve(false);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "razorpay-checkout-js";
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+
+    script.onload = () => resolve(true);
+    script.onerror = () => {
+      console.error("❌ Razorpay script failed to load");
+      resolve(false);
+    };
+
+    document.head.appendChild(script);
+  });
 }
 
 export default function PaywallUnified({ userCountry, onActivated }) {
   const [busy, setBusy] = useState(false);
 
-  // ✅ Only load Razorpay script for India users
+  // ✅ Preload script only for India users
   useEffect(() => {
-    if (userCountry === "IN") loadRazorpayOnce();
+    if (userCountry === "IN") {
+      loadRazorpayScript();
+    }
   }, [userCountry]);
 
+  // ----------------------------------------------------
   // ✅ Razorpay Flow (India)
+  // ----------------------------------------------------
   async function startRazorpay() {
     setBusy(true);
+
+    const scriptReady = await loadRazorpayScript();
+
+    if (!scriptReady || typeof window.Razorpay === "undefined") {
+      alert("Failed to load Razorpay. Please try again.");
+      setBusy(false);
+      return;
+    }
+
     try {
-      const res = await fetch("/api/billing/create-subscription", { method: "POST" });
+      const res = await fetch("/api/billing/create-subscription", {
+        method: "POST",
+        credentials: "include",
+      });
+
       const data = await res.json();
 
-      // Already subscribed (rare case)
       if (data.already_active) {
         onActivated?.();
+        return;
+      }
+
+      if (!data.subscriptionId) {
+        console.error("❌ Missing subscriptionId:", data);
+        alert("Could not start subscription.");
+        setBusy(false);
         return;
       }
 
@@ -39,11 +80,11 @@ export default function PaywallUnified({ userCountry, onActivated }) {
         subscription_id: data.subscriptionId,
         name: "ThumbFlip",
         description: "Monthly Subscription",
-        handler: async function (response) {
+        handler: async (response) => {
           try {
             const verify = await fetch("/api/billing/verify-checkout", {
-              credentials: "include",
               method: "POST",
+              credentials: "include",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(response),
             });
@@ -51,56 +92,69 @@ export default function PaywallUnified({ userCountry, onActivated }) {
             if (verify.ok) {
               onActivated?.();
             } else {
-              alert("Verification failed. Please contact support.");
+              const err = await verify.json().catch(() => ({}));
+              console.error("❌ Verification failed:", err);
+              alert("Verification failed. Contact support.");
             }
           } catch (err) {
-            console.error("Razorpay verification failed:", err);
-            alert("Payment verification failed.");
+            console.error("❌ Verification error:", err);
+            alert("Verification error. Try again.");
           }
         },
         modal: {
-          ondismiss: () => setBusy(false),
+          ondismiss: () => {
+            console.log("Checkout dismissed");
+            setBusy(false);
+          },
         },
       });
 
       rzp.open();
     } catch (err) {
-      console.error("Razorpay error:", err);
-      alert("Failed to initiate Razorpay payment.");
+      console.error("❌ Razorpay start error:", err);
+      alert("Failed to initiate Razorpay checkout.");
       setBusy(false);
     }
   }
 
+  // ----------------------------------------------------
   // ✅ PayPal Flow (International)
+  // ----------------------------------------------------
   async function startPayPal() {
     setBusy(true);
 
     try {
-      const res = await fetch("/api/paypal/create-subscription", { method: "POST" });
+      const res = await fetch("/api/paypal/create-subscription", {
+        method: "POST",
+        credentials: "include",
+      });
+
       const data = await res.json();
 
-      // Already subscribed fallback
       if (data.already_active) {
         onActivated?.();
         return;
       }
 
-      // ✅ store a flag so we resume after redirect
+      if (!data.redirect) {
+        alert("Unable to start PayPal checkout.");
+        setBusy(false);
+        return;
+      }
+
+      // ✅ Persist resume flag
       localStorage.setItem("resumeAfterSubscribe", "1");
-      window.location.href = data.redirect; // PayPal approval URL
+      window.location.href = data.redirect;
     } catch (err) {
-      console.error("PayPal error:", err);
-      alert("Failed to initiate PayPal payment.");
+      console.error("❌ PayPal start error:", err);
+      alert("Failed to initiate PayPal checkout.");
       setBusy(false);
     }
   }
 
   const startPayment = () => {
-    if (userCountry === "IN") {
-      return startRazorpay();
-    } else {
-      return startPayPal();
-    }
+    if (busy) return;
+    return userCountry === "IN" ? startRazorpay() : startPayPal();
   };
 
   return (
