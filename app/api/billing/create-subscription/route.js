@@ -2,20 +2,23 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../../auth/authOptions";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 import Razorpay from "razorpay";
-import { authOptions } from "../../auth/authOptions";
-import { getUserIdFromSession } from "../../../../lib/userIdFromSession";
 
-export async function POST() {
+export async function POST(req) {
   try {
-    // ✅ Correct way to get userId in route handlers
-    const { userId } = await getUserIdFromSession(authOptions);
-    if (!userId) {
+    // ✅ MUST pass req for session to load
+    const session = await getServerSession({ req }, authOptions);
+
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // ✅ Already subscribed?
+    const userId = session.user.id;
+
+    // ✅ Check existing subscription
     const { data: existing } = await supabaseAdmin
       .from("subscriptions")
       .select("status, provider, razorpay_subscription_id")
@@ -29,26 +32,27 @@ export async function POST() {
       });
     }
 
+    // ✅ Create Razorpay subscription
     const rz = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
 
-    // ✅ Razorpay test mode requires total_count >= 1
     const subscription = await rz.subscriptions.create({
       plan_id: process.env.RAZORPAY_PLAN_ID,
-      customer_notify: 1,
       quantity: 1,
-      total_count: 1,
+      customer_notify: 1,
+      total_count: 1,   // required for test mode
       notes: { user_id: userId },
     });
 
+    // ✅ Save new subscription
     await supabaseAdmin.from("subscriptions").upsert({
       user_id: userId,
       provider: "razorpay",
       plan_id: process.env.RAZORPAY_PLAN_ID,
       razorpay_subscription_id: subscription.id,
-      status: "inactive",
+      status: "inactive"
     });
 
     return NextResponse.json({ subscriptionId: subscription.id });
