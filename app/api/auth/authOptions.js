@@ -1,7 +1,6 @@
 import GoogleProvider from "next-auth/providers/google";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Supabase Admin
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -59,23 +58,9 @@ export const authOptions = {
 
   secret: process.env.NEXTAUTH_SECRET,
 
-  // ✅ FIXED: Cookies so API routes can authenticate on your domain
-  cookies: {
-    sessionToken: {
-      name: "__Secure-next-auth.session-token",
-      options: {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-        path: "/",
-      },
-    },
-  },
-
   callbacks: {
     async jwt({ token, account, user }) {
       if (account && user) {
-        // ✅ Check or create user in Supabase
         const { data: existing } = await supabaseAdmin
           .from("app_users")
           .select("id")
@@ -102,10 +87,9 @@ export const authOptions = {
         }
 
         token.userId = userId;
-
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
-        token.accessTokenExpires = Date.now() + (account.expires_in * 1000);
+        token.accessTokenExpires = Date.now() + account.expires_in * 1000;
 
         token.email = user.email;
         return token;
@@ -121,6 +105,7 @@ export const authOptions = {
     async session({ session, token }) {
       session.user.id = token.userId;
       session.user.email = token.email;
+
       session.accessToken = token.accessToken;
       session.refreshToken = token.refreshToken;
       session.error = token.error;

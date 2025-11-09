@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:mobile="http://www.google.com/schemas/sitemap-mobile/1.0" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1" xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
-<url><loc>https://thumbflip.co/dashboard/stats</loc><lastmod>2025-11-09T10:02:45.950Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
-<url><loc>https://thumbflip.co/billing/cancel</loc><lastmod>2025-11-09T10:02:45.951Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
-<url><loc>https://thumbflip.co/billing/manage</loc><lastmod>2025-11-09T10:02:45.951Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
-<url><loc>https://thumbflip.co/dashboard</loc><lastmod>2025-11-09T10:02:45.951Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
-<url><loc>https://thumbflip.co</loc><lastmod>2025-11-09T10:02:45.951Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
-<url><loc>https://thumbflip.co/terms</loc><lastmod>2025-11-09T10:02:45.951Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
-<url><loc>https://thumbflip.co/privacy-policy</loc><lastmod>2025-11-09T10:02:45.951Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
-<url><loc>https://thumbflip.co/billing/success</loc><lastmod>2025-11-09T10:02:45.951Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co/dashboard/stats</loc><lastmod>2025-11-09T10:42:23.212Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co/billing/manage</loc><lastmod>2025-11-09T10:42:23.213Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co/dashboard</loc><lastmod>2025-11-09T10:42:23.213Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co/billing/cancel</loc><lastmod>2025-11-09T10:42:23.213Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co</loc><lastmod>2025-11-09T10:42:23.213Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co/terms</loc><lastmod>2025-11-09T10:42:23.213Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co/privacy-policy</loc><lastmod>2025-11-09T10:42:23.213Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>https://thumbflip.co/billing/success</loc><lastmod>2025-11-09T10:42:23.213Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
 </urlset>
