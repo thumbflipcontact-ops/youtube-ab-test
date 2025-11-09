@@ -2,16 +2,15 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../../auth/authOptions";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 import Razorpay from "razorpay";
+import { authOptions } from "../../auth/authOptions";
+import { getUserIdFromSession } from "../../../../lib/userIdFromSession";
 
 export async function POST() {
   try {
-    const session = await getServerSession(authOptions);
-    const userId = session?.user?.id;
-
+    // ✅ Correct way to get userId in route handlers
+    const { userId } = await getUserIdFromSession(authOptions);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -35,12 +34,12 @@ export async function POST() {
       key_secret: process.env.RAZORPAY_KEY_SECRET,
     });
 
-    // ✅ Test mode fix: total_count must be >=1
+    // ✅ Razorpay test mode requires total_count >= 1
     const subscription = await rz.subscriptions.create({
       plan_id: process.env.RAZORPAY_PLAN_ID,
       customer_notify: 1,
       quantity: 1,
-      total_count: 1, // ✅ IMPORTANT: Test mode requirement
+      total_count: 1,
       notes: { user_id: userId },
     });
 
