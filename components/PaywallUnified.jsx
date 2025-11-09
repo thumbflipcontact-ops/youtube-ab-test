@@ -42,6 +42,7 @@ export default function PaywallUnified({ userCountry, onActivated }) {
         handler: async function (response) {
           try {
             const verify = await fetch("/api/billing/verify-checkout", {
+              credentials: "include",
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(response),

@@ -59,10 +59,23 @@ export const authOptions = {
 
   secret: process.env.NEXTAUTH_SECRET,
 
+  // ✅ FIXED: Cookies so API routes can authenticate on your domain
+  cookies: {
+    sessionToken: {
+      name: "__Secure-next-auth.session-token",
+      options: {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        path: "/",
+      },
+    },
+  },
+
   callbacks: {
     async jwt({ token, account, user }) {
       if (account && user) {
-        // ✅ 1. Check or create Supabase user
+        // ✅ Check or create user in Supabase
         const { data: existing } = await supabaseAdmin
           .from("app_users")
           .select("id")
@@ -70,7 +83,6 @@ export const authOptions = {
           .maybeSingle();
 
         let userId;
-
         if (existing) {
           userId = existing.id;
         } else {
@@ -89,31 +101,28 @@ export const authOptions = {
           userId = created.id;
         }
 
-        // ✅ STORE userId IN TOKEN
         token.userId = userId;
 
-        // ✅ Google OAuth tokens
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
-        token.accessTokenExpires = Date.now() + account.expires_in * 1000;
+        token.accessTokenExpires = Date.now() + (account.expires_in * 1000);
 
         token.email = user.email;
         return token;
       }
 
-      if (Date.now() < token.accessTokenExpires) return token;
+      if (Date.now() >= token.accessTokenExpires) {
+        return refreshAccessToken(token);
+      }
 
-      return refreshAccessToken(token);
+      return token;
     },
 
     async session({ session, token }) {
-      // ✅ EXPOSE userId TO SESSION
       session.user.id = token.userId;
       session.user.email = token.email;
-
       session.accessToken = token.accessToken;
       session.refreshToken = token.refreshToken;
-
       session.error = token.error;
       return session;
     },
