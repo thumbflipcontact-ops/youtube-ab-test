@@ -7,10 +7,10 @@ import { authOptions } from "../../auth/authOptions";
 import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 import Razorpay from "razorpay";
 
-export async function POST(req) {
+export async function POST() {
   try {
-    // ✅ MUST pass req for session to load
-    const session = await getServerSession({ req }, authOptions);
+    // ✅ App router correct method — no req needed
+    const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -32,7 +32,7 @@ export async function POST(req) {
       });
     }
 
-    // ✅ Create Razorpay subscription
+    // ✅ Razorpay
     const rz = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -42,17 +42,17 @@ export async function POST(req) {
       plan_id: process.env.RAZORPAY_PLAN_ID,
       quantity: 1,
       customer_notify: 1,
-      total_count: 1,   // required for test mode
+      total_count: 1,
       notes: { user_id: userId },
     });
 
-    // ✅ Save new subscription
+    // ✅ Store in DB
     await supabaseAdmin.from("subscriptions").upsert({
       user_id: userId,
       provider: "razorpay",
       plan_id: process.env.RAZORPAY_PLAN_ID,
       razorpay_subscription_id: subscription.id,
-      status: "inactive"
+      status: "inactive",
     });
 
     return NextResponse.json({ subscriptionId: subscription.id });
