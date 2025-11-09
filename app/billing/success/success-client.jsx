@@ -19,19 +19,10 @@ export default function BillingSuccessClient() {
         });
       }
 
-      const resume = localStorage.getItem("resumeAfterSubscribe");
-      if (resume === "1") localStorage.removeItem("resumeAfterSubscribe");
-
+      localStorage.removeItem("resumeAfterSubscribe");
       router.replace("/dashboard");
     }
 
     finalize();
   }, [searchParams, router]);
-
-  return (
-    <div className="p-10 text-center">
-      <h1 className="text-2xl font-bold mb-2">Finalizing your subscription…</h1>
-      <p className="text-gray-600">Please wait a moment.</p>
-    </div>
-  );
 }
