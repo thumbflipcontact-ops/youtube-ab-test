@@ -154,7 +154,7 @@ export default function PaywallUnified({ userCountry, onActivated }) {
 
   const startPayment = () => {
     if (busy) return;
-    return userCountry === "IN" ? startRazorpay() : startPayPal();
+    return userCountry === "IN" ? startPayPal() : startPayPal();
   };
 
   return (
