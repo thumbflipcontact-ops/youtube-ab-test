@@ -9,34 +9,19 @@ export default function BillingSuccessClient() {
 
   useEffect(() => {
     async function finalize() {
-      // ✅ PayPal returns subscription_id in the URL
-      const paypalSubId = searchParams.get("subscription_id");
+      const subscriptionId = searchParams.get("subscription_id");
 
-      if (paypalSubId) {
-        const verify = await fetch("/api/paypal/verify", {
+      if (subscriptionId) {
+        await fetch("/api/paypal/verify", {
           method: "POST",
-          credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ subscription_id: paypalSubId }),
+          body: JSON.stringify({ subscription_id: subscriptionId }),
         });
-
-        if (verify.ok) {
-          router.replace("/dashboard");
-        } else {
-          alert("PayPal verification failed. Please contact support.");
-          router.replace("/billing/cancel");
-        }
-        return;
       }
 
-      // ✅ Razorpay flow ("resumeAfterSubscribe")
-      if (localStorage.getItem("resumeAfterSubscribe") === "1") {
-        localStorage.removeItem("resumeAfterSubscribe");
-        router.replace("/dashboard");
-        return;
-      }
+      const resume = localStorage.getItem("resumeAfterSubscribe");
+      if (resume === "1") localStorage.removeItem("resumeAfterSubscribe");
 
-      // ✅ If user hits this page manually → send to dashboard
       router.replace("/dashboard");
     }
 
