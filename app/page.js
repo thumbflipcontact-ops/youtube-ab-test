@@ -14,7 +14,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white px-6">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white px-6">
       {/* Headline */}
       <motion.h1
         className="text-4xl md:text-6xl font-extrabold text-center mb-4 bg-clip-text text-transparent bg-gradient-to-r from-red-400 to-yellow-300 drop-shadow-md"
@@ -34,6 +34,7 @@ export default function HomePage() {
       >
         Sign in with Google. Select a video from your YouTube channel. Upload up to 10 thumbnails per video and schedule hourly, daily or weekly rotations using <span className="text-red-400 font-semibold">ThumbFlip</span> — so you can focus on creating.
       </motion.p>
+
       {/* Call to Action */}
       <motion.button
         onClick={() => router.push('/api/auth/signin')}
@@ -65,6 +66,23 @@ export default function HomePage() {
       >
         ✨ Built for creators.
       </motion.p>
+
+      {/* ✅ Autoplay video (no loop) with rounded corners */}
+      <motion.div
+        className="mt-8 w-full max-w-3xl rounded-xl overflow-hidden shadow-xl border border-white/10"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.2 }}
+      >
+        <video
+          src="/videos/demo.mp4"
+          autoPlay
+          muted
+          controls
+          playsInline
+          className="w-full h-auto rounded-xl"
+        ></video>
+      </motion.div>
     </div>
   )
 }
