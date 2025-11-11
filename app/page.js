@@ -32,7 +32,7 @@ export default function HomePage() {
         animate={{ opacity: 1 }}
         transition={{ delay: 0.3, duration: 0.6 }}
       >
-        Sign in with Google. Select a video from your YouTube channel. Upload up to 10 thumbnails per video and schedule hourly, daily or weekly rotations using <span className="text-red-400 font-semibold">ThumbFlip</span> — so you can focus on creating.
+        Sign in with Google. Select a video from your YouTube channel. Upload up to 10 thumbnails per video and schedule hourly, daily or weekly rotations using <span className="text-red-400 font-semibold">ThumbFlip</span> — so you can focus on creating. Get more views, subs, and ad revenue, automatically!
       </motion.p>
 
       {/* Call to Action */}
