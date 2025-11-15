@@ -1,4 +1,6 @@
-// ✅ Must be at the top
+// =============================================================
+// NEXT.JS ROUTE CONFIG (must be first)
+// =============================================================
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -10,19 +12,15 @@ import { DateTime } from "luxon";
 import { supabase } from "../../../lib/supabase";
 import { getYouTubeClientForUserByEmail } from "../../../lib/youtubeClient";
 
-// ✅ Normalize secret (remove spaces, force lowercase)
+// Normalize secret
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim().toLowerCase();
 
-/* --------------------------------------------------------------
-   ✅ Helper: Sleep utility for spacing YouTube API calls
--------------------------------------------------------------- */
+// Sleep helper
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/* --------------------------------------------------------------
-   ✅ Helper: Upload thumbnail with retries + rate-limit handling
--------------------------------------------------------------- */
+// Upload thumbnail with retries
 async function uploadThumbnailSafe(youtube, videoId, imageBuffer) {
   const MAX_RETRIES = 3;
 
@@ -36,59 +34,56 @@ async function uploadThumbnailSafe(youtube, videoId, imageBuffer) {
         },
       });
 
-      return { ok: true }; // Success ✅
+      return { ok: true };
     } catch (err) {
-      // ✅ YouTube rate limit
-      if (err.code === 429) {
-        console.warn(
-          `⚠️ Rate limit for ${videoId}. Retrying (${attempt + 1}/${MAX_RETRIES})`
-        );
-        await sleep(1500 * (attempt + 1));
+      // Rate limit retry
+      if (err.code === 429 || err.response?.status === 429) {
+        console.warn(`⚠️ Rate limit for ${videoId}. Retrying attempt ${attempt + 1}`);
+        await sleep(1500);
         continue;
       }
 
-      // ✅ Fatal YouTube error
-      console.error("❌ Fatal thumbnail upload error:", err);
+      // 401 unauthorized → token expired → probably needs refresh
+      console.error("❌ YouTube Upload Error:", err.response?.data || err.message);
       return { ok: false, fatal: true, error: err.message };
     }
   }
 
-  // ✅ 429 exhausted
   return { ok: false, fatal: false, reason: "rate-limit" };
 }
 
-/* --------------------------------------------------------------
-   ✅ Helper: Check if test has ended
--------------------------------------------------------------- */
+// Test end logic
 function testHasEnded(test) {
-  // ✅ Analytics have been collected → test fully finished
   if (test.analytics_collected) return true;
 
-  // ✅ end_datetime has passed
   if (test.end_datetime) {
-    const end = DateTime.fromISO(test.end_datetime);
+    const end = DateTime.fromISO(test.end_datetime).toUTC();
     if (end < DateTime.now().toUTC()) return true;
   }
 
   return false;
 }
 
+// =============================================================
+// CRON HANDLER
+// =============================================================
 export async function GET(req) {
-  // ✅ Validate cron secret
+  // Validate secret
   const headerSecret = (req.headers.get("x-cron-secret") || "")
     .trim()
     .toLowerCase();
 
   if (!headerSecret || headerSecret !== CRON_SECRET) {
+    console.log("❌ Invalid cron secret");
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    console.log("✅ Cron triggered. Fetching due tests...");
+    console.log("🚀 Cron Triggered at", DateTime.now().toUTC().toISO());
 
     const nowUTC = DateTime.now().toUTC().toISO();
 
-    // ✅ Fetch tests whose next_run_time <= now AND not analytics_collected
+    // Fetch tests whose next_run_time <= now
     const { data: tests, error } = await supabase
       .from("ab_tests")
       .select("*")
@@ -96,8 +91,8 @@ export async function GET(req) {
       .eq("analytics_collected", false);
 
     if (error) {
-      console.error("❌ Database error:", error);
-      return NextResponse.json({ message: "Database error" }, { status: 500 });
+      console.error("❌ Supabase fetch error:", error);
+      return NextResponse.json({ error: "DB error" }, { status: 500 });
     }
 
     if (!tests || tests.length === 0) {
@@ -105,31 +100,28 @@ export async function GET(req) {
       return NextResponse.json({ rotated: 0 });
     }
 
-    /* --------------------------------------------------------------
-       ✅ Group tests per user
-       We will rotate ONLY ONE TEST per user per cron run
-    -------------------------------------------------------------- */
+    console.log(`📌 ${tests.length} test(s) are due.`);
+
+    // Group by user → rotate one test per user
     const testsByUser = {};
-    for (const test of tests) {
-      if (!testsByUser[test.user_email]) testsByUser[test.user_email] = [];
-      testsByUser[test.user_email].push(test);
+    for (const t of tests) {
+      if (!testsByUser[t.user_email]) testsByUser[t.user_email] = [];
+      testsByUser[t.user_email].push(t);
     }
 
-    let totalRotations = 0;
+    let rotatedCount = 0;
 
-    /* --------------------------------------------------------------
-       ✅ For each user → rotate ONE test
-    -------------------------------------------------------------- */
     for (const userEmail of Object.keys(testsByUser)) {
       let userTests = testsByUser[userEmail];
 
-      // ✅ Sort by next_run_time so oldest rotations go first
+      // Sort by next_run_time
       userTests.sort(
         (a, b) =>
-          new Date(a.next_run_time || 0) - new Date(b.next_run_time || 0)
+          new Date(a.next_run_time || 0) -
+          new Date(b.next_run_time || 0)
       );
 
-      const test = userTests[0]; // rotate one per user
+      const test = userTests[0];
 
       const {
         id,
@@ -138,79 +130,77 @@ export async function GET(req) {
         current_index,
         rotation_interval_unit,
         rotation_interval_value,
-        end_datetime,
       } = test;
 
-      // ✅ Skip invalid thumbnails
+      console.log(`🔍 Checking test ${id} for user ${userEmail}`);
+
       if (!thumbnail_urls || thumbnail_urls.length === 0) {
-        console.warn(`Skipping test ${id}: no thumbnails.`);
+        console.warn(`⚠️ Test ${id} skipped: no thumbnails.`);
         continue;
       }
 
-      // ✅ Skip ended tests (IMPORTANT!)
       if (testHasEnded(test)) {
-        console.log(`⏹️ Test ${id} has ended. Skipping rotation and DB update.`);
+        console.log(`⏹️ Test ${id} ended. Skipping rotation.`);
         continue;
       }
 
-      // ✅ Prepare next thumbnail
       const nextIndex = (current_index + 1) % thumbnail_urls.length;
       const nextThumbnail = thumbnail_urls[nextIndex];
 
-      console.log(`🔄 Rotating video ${video_id} → ${nextThumbnail}`);
+      console.log(`🔄 Rotating video ${video_id}, next thumbnail index ${nextIndex}`);
 
-      // ✅ Get YouTube API client
-      const { youtube } = await getYouTubeClientForUserByEmail(userEmail);
+      // Get YouTube API client (refresh token inside)
+      const yt = await getYouTubeClientForUserByEmail(userEmail);
 
-      // ✅ Fetch image
-      const img = await axios.get(nextThumbnail, {
-        responseType: "arraybuffer",
-      });
+      if (!yt?.youtube) {
+        console.error(`❌ No YouTube client available for ${userEmail}`);
+        continue;
+      }
 
-      // ✅ Upload thumbnail safely
-      const uploadResult = await uploadThumbnailSafe(
-        youtube,
+      // Fetch image
+      const img = await axios.get(nextThumbnail, { responseType: "arraybuffer" });
+
+      // Upload
+      const result = await uploadThumbnailSafe(
+        yt.youtube,
         video_id,
         Buffer.from(img.data)
       );
 
-      if (!uploadResult.ok) {
-        console.warn(`⚠️ Skipping rotation for ${video_id}. Reason:`, uploadResult.reason || uploadResult.error);
-        continue; // Do not fail cron
+      if (!result.ok) {
+        console.warn(`⚠️ Rotation failed for test ${id} reason:`, result.reason || result.error);
+        continue;
       }
 
-      // ✅ Only update DB for ACTIVE tests
-      const nextTime = DateTime.now()
+      console.log(`✅ Thumbnail rotated for test ${id}`);
+
+      // Compute next run
+      const nextRun = DateTime.now()
         .toUTC()
-        .plus({ [rotation_interval_unit]: rotation_interval_value });
+        .plus({ [rotation_interval_unit]: rotation_interval_value })
+        .toISO();
 
       await supabase
         .from("ab_tests")
         .update({
           current_index: nextIndex,
           last_rotation_time: DateTime.now().toUTC().toISO(),
-          next_run_time: nextTime.toISO(),
+          next_run_time: nextRun,
         })
         .eq("id", id);
 
-      console.log(`✅ Rotation completed for test ${id}`);
-
-      totalRotations++;
-
-      // ✅ Delay helps prevent YouTube rate limits
+      rotatedCount++;
       await sleep(500);
     }
 
     return NextResponse.json(
-      { success: true, rotated: totalRotations },
+      { success: true, rotated: rotatedCount },
       { status: 200 }
     );
   } catch (err) {
-    console.error("❌ Unexpected server error:", err);
-
-    // ✅ DO NOT fail cron — return 200 OK
+    console.error("❌ Cron handler error:", err);
     return NextResponse.json(
-      { message: "Server error (logged)", error: err.message },
+      { error: err.message, success: false },
       { status: 200 }
     );
   }
