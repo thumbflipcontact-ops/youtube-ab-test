@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { useSession } from 'next-auth/react';
+import { useRouter } from "next/navigation";
 
 /**
  * Convert datetime-local (local timezone) → true UTC ISO string
@@ -10,6 +11,8 @@ function toUTC(localDateTimeString) {
   if (!localDateTimeString) return '';
   return new Date(localDateTimeString).toISOString();
 }
+
+const router = useRouter();
 
 export default function ABTestForm({ videoId, thumbnails }) {
   const { data: session } = useSession();
@@ -62,7 +65,7 @@ export default function ABTestForm({ videoId, thumbnails }) {
 
       if (res.status === 200 || res.status === 201) {
         alert('✅ A/B Test Created Successfully!');
-        router.push('/my-tests');   // <-- redirect to summary page
+        router.push('api/my-tests');   // <-- redirect to summary page
       }
     } catch (err) {
       console.error(err);
