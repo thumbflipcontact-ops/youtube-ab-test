@@ -5,162 +5,147 @@ import { exec } from "child_process";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabase.js";
 
-console.log("🕒 Smart Scheduler started (UTC Time)...");
+console.log("🕒 Smart Scheduler started (UTC)...");
 
-// --- Store active jobs so we don’t duplicate ---
+// Active running jobs map: { testId: { job, running, lastExecAt } }
 const activeJobs = new Map();
 
-/**
- * 🧮 Convert (value + unit) → cron expression
- */
+/** Convert value+unit → cron expression */
 function getCronExpression(value, unit) {
   switch (unit) {
-    case "minutes":
-      return `*/${value} * * * *`;
-    case "hours":
-      return `0 */${value} * * *`;
-    case "days":
-      return `0 0 */${value} * *`;
-    case "weeks":
-      return `0 0 */${7 * value} * *`;
-    default:
-      return "0 */4 * * *"; // fallback: every 4 hours
+    case "seconds": return `*/${value} * * * * *`;
+    case "minutes": return `*/${value} * * * *`;
+    case "hours":   return `0 */${value} * * *`;
+    case "days":    return `0 0 */${value} * *`;
+    case "weeks":   return `0 0 */${7 * value} * *`;
+    default:        return "0 */4 * * *";
   }
 }
 
-/**
- * 🧠 Fetch currently active A/B tests (UTC)
- */
+/** Fetch all currently active tests (in UTC) */
 async function fetchActiveTests() {
-  const nowUtc = DateTime.utc();
+  const now = DateTime.utc();
 
   const { data, error } = await supabase
     .from("ab_tests")
     .select(
-      "id, video_id, start_datetime, end_datetime, rotation_interval_value, rotation_interval_unit"
+      "id, video_id, user_email, start_datetime, end_datetime, rotation_interval_value, rotation_interval_unit, thumbnail_urls, analytics_collected"
     );
 
   if (error) {
-    console.error("❌ Failed to fetch active A/B tests:", error);
+    console.error("❌ Could not load AB tests:", error);
     return [];
   }
 
-  // 🕓 Filter in JS based on UTC
-  return (
-    data?.filter((t) => {
-      const start = DateTime.fromISO(t.start_datetime, { zone: "utc" });
-      const end = DateTime.fromISO(t.end_datetime, { zone: "utc" });
-      return nowUtc >= start && nowUtc <= end;
-    }) || []
-  );
+  return data.filter((t) => {
+    const start = DateTime.fromISO(t.start_datetime, { zone: "utc" });
+    const end   = DateTime.fromISO(t.end_datetime,   { zone: "utc" });
+
+    return (
+      t.analytics_collected === false &&
+      DateTime.utc() >= start &&
+      DateTime.utc() <= end &&
+      t.thumbnail_urls?.length > 0
+    );
+  });
 }
 
-/**
- * 🌀 Schedule or cancel rotations dynamically (UTC)
- */
+/** Refresh scheduler jobs — runs every 5 minutes */
 async function refreshRotations() {
-  console.log("🔁 Checking for active A/B tests...");
+  console.log("🔁 Refreshing scheduled jobs...");
 
   const activeTests = await fetchActiveTests();
-  const activeIds = new Set(activeTests.map((t) => t.id));
+  const activeIds = new Set(activeTests.map(t => t.id));
 
-  // --- Cancel jobs for tests that are no longer active ---
-  for (const [id, job] of activeJobs.entries()) {
+  // Stop jobs for tests that are no longer active
+  for (const [id, meta] of activeJobs.entries()) {
     if (!activeIds.has(id)) {
-      console.log(`🛑 Cancelling rotation job for test ${id} (no longer active).`);
-      job.stop();
+      console.log(`🛑 Stopping job for test ${id}`);
+      meta.job.stop();
       activeJobs.delete(id);
     }
   }
 
-  // --- Create jobs for newly active tests ---
+  // Start jobs for newly active tests
   for (const test of activeTests) {
     const { id, video_id, rotation_interval_value, rotation_interval_unit } = test;
 
-    if (activeJobs.has(id)) continue; // already scheduled
+    if (activeJobs.has(id)) continue;
 
-    const cronExp = getCronExpression(
-      rotation_interval_value || 4,
-      rotation_interval_unit || "hours"
-    );
+    const cronExp = getCronExpression(rotation_interval_value, rotation_interval_unit);
 
-    console.log(
-      `📅 Scheduling rotation for video ${video_id} (test ${id}) every ${rotation_interval_value} ${rotation_interval_unit} (${cronExp})`
-    );
+    console.log(`📅 Scheduling test ${id} — every ${rotation_interval_value} ${rotation_interval_unit} (${cronExp})`);
 
     const job = cron.schedule(
       cronExp,
       () => {
-        const nowUtcIso = DateTime.utc().toISO();
-        console.log(`🔁 [${nowUtcIso}] Rotating thumbnails for video ${video_id} (test ${id})...`);
-        exec(`node server/serverCron.js ${video_id}`, (error) => {
-          if (error) {
-            console.error(`❌ Rotation failed for video ${video_id}:`, error);
-          } else {
-            console.log(`✅ Rotation complete for video ${video_id}`);
-          }
-        });
-      },
-      { timezone: "UTC" } // ✅ ensure cron runs in UTC
-    );
+        const meta = activeJobs.get(id);
 
-    activeJobs.set(id, job);
-  }
-
-  console.log(`✅ Active rotation jobs: ${activeJobs.size}`);
-}
-
-/**
- * 📈 Daily analytics at 00:00 UTC
- */
-function scheduleDailyAnalytics() {
-  const utcMidnight = "0 0 * * *";
-
-  console.log("📊 Scheduling daily analytics at 00:00 UTC...");
-
-  cron.schedule(
-    utcMidnight,
-    () => {
-      const nowUtcIso = DateTime.utc().toISO();
-      console.log(`🌙 [${nowUtcIso}] Running YouTube analytics sync...`);
-
-      exec("node server/serverAnalyticsCron.js", (error, stdout, stderr) => {
-        if (error) {
-          console.error("❌ Analytics sync failed:", error);
+        // Prevent overlapping runs
+        if (meta?.running) {
+          console.log(`⏳ Skipping test ${id} — previous run still active`);
           return;
         }
-        console.log(stdout || "✅ Analytics sync completed.");
-        if (stderr) console.error(stderr);
-      });
+
+        console.log(`🔄 Executing rotation for test ${id} at ${DateTime.utc().toISO()}`);
+
+        activeJobs.set(id, { ...meta, running: true });
+
+        exec(`node server/serverCron.js ${id}`, (error, stdout, stderr) => {
+          activeJobs.set(id, { running: false });
+
+          if (error) {
+            console.error(`❌ Rotation failed for test ${id}:`, error.message);
+            if (stderr) console.error("stderr:", stderr);
+            return;
+          }
+
+          if (stdout.trim()) console.log(stdout.trim());
+          if (stderr.trim()) console.warn(stderr.trim());
+
+          console.log(`✅ Rotation finished for test ${id}`);
+        });
+      },
+      { timezone: "UTC" }
+    );
+
+    activeJobs.set(id, { job, running: false });
+  }
+
+  console.log(`📌 Active scheduled jobs: ${activeJobs.size}`);
+}
+
+/** Daily analytics runner */
+function scheduleAnalytics() {
+  console.log("📊 Scheduling analytics at 00:00 UTC");
+  cron.schedule(
+    "0 0 * * *",
+    () => {
+      console.log(`📊 Running analytics at ${DateTime.utc().toISO()}`);
+      exec("node server/serverAnalyticsCron.js");
     },
     { timezone: "UTC" }
   );
 }
 
-/**
- * 🚀 Start the scheduler (UTC)
- */
+/** Start scheduler */
 async function startScheduler() {
-  console.log("🚀 Starting Dynamic Scheduler (UTC)...");
+  console.log("🚀 Booting scheduler service...");
 
-  // Run immediately at launch
   await refreshRotations();
 
-  // Recheck every 5 minutes for new/ended tests
   cron.schedule(
     "*/5 * * * *",
     async () => {
-      const nowUtcIso = DateTime.utc().toISO();
-      console.log(`🔄 [${nowUtcIso}] Refreshing rotation schedule (every 5 min)...`);
+      console.log(`🔄 Checking for updated test schedules at ${DateTime.utc().toISO()}`);
       await refreshRotations();
     },
     { timezone: "UTC" }
   );
 
-  // Daily analytics
-  scheduleDailyAnalytics();
+  scheduleAnalytics();
 
-  console.log("✅ Scheduler setup complete (UTC).");
+  console.log("✅ Scheduler running!");
 }
 
 startScheduler();

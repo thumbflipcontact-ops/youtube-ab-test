@@ -1,223 +1,150 @@
 // server/serverCron.js
-import { google } from "googleapis";
-import dotenv from "dotenv";
 import "dotenv/config";
-import path from "path";
 import fs from "fs";
+import path from "path";
 import axios from "axios";
 import sharp from "sharp";
-import cron from "node-cron";
+import { google } from "googleapis";
 import { DateTime } from "luxon";
 import { supabase } from "../lib/supabase.js";
 
-console.log("🕒 Thumbnail rotation cron started (UTC Time)...");
+const testId = process.argv[2]; // scheduler passes testId
 
-// -------------------------------------------------
-// 1️⃣ Helper: Convert interval to milliseconds
-// -------------------------------------------------
-function getIntervalMs(value, unit) {
-  switch (unit) {
-    case "seconds":
-      return value * 1000;
-    case "minutes":
-      return value * 60 * 1000;
-    case "hours":
-      return value * 60 * 60 * 1000;
-    case "days":
-      return value * 24 * 60 * 60 * 1000;
-    default:
-      return value * 60 * 1000;
-  }
-}
+console.log(`🔧 Worker started — rotating test ${testId}`);
 
-// -------------------------------------------------
-// 2️⃣ Helper: Get a fresh OAuth2 client for a user
-// -------------------------------------------------
-async function getOAuth2ClientForUser(userEmail) {
-  const { data: user, error } = await supabase
+/** Get OAuth2 client for user */
+async function getOAuth2Client(email) {
+  const { data, error } = await supabase
     .from("app_users")
     .select("refresh_token")
-    .eq("email", userEmail)
+    .eq("email", email)
     .single();
 
-  if (error || !user?.refresh_token) {
-    console.warn(`⚠️ No refresh token found for ${userEmail}`);
+  if (error || !data?.refresh_token) {
+    console.error(`❌ No refresh token for ${email}`);
     return null;
   }
 
-  const oauth2Client = new google.auth.OAuth2(
+  const oauth = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    process.env.NEXTAUTH_URL
-      ? `${process.env.NEXTAUTH_URL}/api/auth/callback/google`
-      : "http://localhost:3000/api/auth/callback/google"
+    process.env.NEXTAUTH_URL + "/api/auth/callback/google"
   );
 
-  oauth2Client.setCredentials({
-    refresh_token: user.refresh_token,
-  });
+  oauth.setCredentials({ refresh_token: data.refresh_token });
 
   try {
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    oauth2Client.setCredentials(credentials);
-    return oauth2Client;
+    const { credentials } = await oauth.refreshAccessToken();
+    oauth.setCredentials(credentials);
+    return oauth;
   } catch (err) {
-    console.error(`❌ Failed to refresh token for ${userEmail}: ${err.message}`);
+    console.error(`❌ Token refresh failed for ${email}`, err.message);
     return null;
   }
 }
 
-// -------------------------------------------------
-// 3️⃣ Upload new thumbnail to YouTube
-// -------------------------------------------------
-async function rotateThumbnail(videoId, imageUrl, oauth2Client) {
+/** Rotate thumbnail */
+async function rotate(videoId, thumbnailUrl, oauth) {
   try {
-    const youtube = google.youtube({ version: "v3", auth: oauth2Client });
-    const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
-    const buffer = Buffer.from(response.data);
-    const mimeType = response.headers["content-type"];
+    const youtube = google.youtube({ version: "v3", auth: oauth });
 
-    // ✅ Validate file type
-    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-    if (!allowedTypes.includes(mimeType))
-      throw new Error(`Unsupported type: ${mimeType}`);
+    const resp = await axios.get(thumbnailUrl, { responseType: "arraybuffer" });
+    const buffer = Buffer.from(resp.data);
+    const mime = resp.headers["content-type"];
 
-    // ✅ Validate size
-    const sizeMB = buffer.length / (1024 * 1024);
-    if (sizeMB > 2) throw new Error(`File too large (${sizeMB.toFixed(2)} MB)`);
+    const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (!allowed.includes(mime)) throw new Error("Unsupported type " + mime);
 
-    // ✅ Validate dimensions
-    const { width, height } = await sharp(buffer).metadata();
-    if (width < 640) throw new Error(`Width too small (${width}px)`);
+    const { width } = await sharp(buffer).metadata();
+    if (width < 640) throw new Error("Width < 640px");
 
-    const ext = mimeType.split("/")[1].replace("jpeg", "jpg");
-    const tempPath = path.join(process.cwd(), `temp_${videoId}.${ext}`);
-    fs.writeFileSync(tempPath, buffer);
+    const ext = mime.split("/")[1].replace("jpeg", "jpg");
+    const temp = path.join(process.cwd(), `temp-${videoId}.${ext}`);
+    fs.writeFileSync(temp, buffer);
 
-    console.log(`📤 Uploading thumbnail for ${videoId}...`);
-    const res = await youtube.thumbnails.set({
+    console.log(`📤 Uploading to YouTube for video ${videoId}...`);
+
+    await youtube.thumbnails.set({
       videoId,
       media: {
-        mimeType,
-        body: fs.createReadStream(tempPath),
+        mimeType: mime,
+        body: fs.createReadStream(temp),
       },
     });
 
-    fs.unlinkSync(tempPath);
-    console.log(`✅ Thumbnail updated for video ${videoId}`);
+    fs.unlinkSync(temp);
+
+    console.log(`✅ YouTube thumbnail updated for video ${videoId}`);
     return true;
   } catch (err) {
-    if (err.message.includes("quota")) {
-      console.warn("⚠️ Quota exceeded, pausing rotations temporarily.");
-    } else {
-      console.error(`❌ Thumbnail rotation failed: ${err.message}`);
-    }
+    console.error(`❌ Thumbnail upload error:`, err.message);
     return false;
   }
 }
 
-// -------------------------------------------------
-// 4️⃣ Main logic: process active tests only
-// -------------------------------------------------
-async function processABTests() {
-  console.log("🔍 Checking active A/B tests...");
-  const now = DateTime.utc();
-
-  const { data: tests, error } = await supabase
+/** Main function */
+async function runTestRotation(testId) {
+  const { data: test, error } = await supabase
     .from("ab_tests")
     .select("*")
-    .eq("analytics_collected", false); // skip ended tests
+    .eq("id", testId)
+    .single();
 
-  if (error) {
-    console.error("❌ Error fetching tests:", error);
+  if (error || !test) {
+    console.error(`❌ Cannot load test ${testId}`);
     return;
   }
 
-  for (const test of tests) {
-    const {
-      id,
-      video_id,
-      thumbnail_urls,
-      start_datetime,
-      end_datetime,
-      rotation_interval_value,
-      rotation_interval_unit,
-      last_rotation_time,
-      current_index = 0,
-      user_email,
-    } = test;
+  const {
+    user_email,
+    video_id,
+    thumbnail_urls,
+    current_index,
+    rotation_interval_unit,
+    rotation_interval_value,
+    last_rotation_time,
+  } = test;
 
-    const start = DateTime.fromISO(start_datetime, { zone: "utc" });
-    const end = DateTime.fromISO(end_datetime, { zone: "utc" });
-    const lastRotation = last_rotation_time
-      ? DateTime.fromISO(last_rotation_time, { zone: "utc" })
-      : null;
+  const oauth = await getOAuth2Client(user_email);
 
-    if (now < start) {
-      console.log(`⏳ Test ${id} not started yet (starts ${start.toISO()})`);
-      continue;
-    }
-    if (now > end) {
-      console.log(`🛑 Test ${id} ended (ended ${end.toISO()})`);
-      continue;
-    }
+  if (!oauth) return;
 
-    const intervalMs = getIntervalMs(rotation_interval_value, rotation_interval_unit);
-    const nextRotation = lastRotation
-      ? lastRotation.plus({ milliseconds: intervalMs })
-      : start;
+  const nextIndex = (current_index + 1) % thumbnail_urls.length;
+  const nextThumb = thumbnail_urls[nextIndex];
 
-    if (!lastRotation || now >= nextRotation) {
-      console.log(`🔄 Rotating thumbnail for video ${video_id} (test ${id})...`);
+  const success = await rotate(video_id, nextThumb, oauth);
 
-      if (!thumbnail_urls || thumbnail_urls.length === 0) {
-        console.warn(`⚠️ No thumbnails provided for test ${id}`);
-        continue;
-      }
+  if (!success) return;
 
-      const oauth2Client = await getOAuth2ClientForUser(user_email);
-      if (!oauth2Client) {
-        console.warn(`⚠️ Skipping test ${id}: missing OAuth credentials`);
-        continue;
-      }
+  const now = DateTime.utc();
+  const intervalMs =
+    rotation_interval_unit === "seconds"
+      ? rotation_interval_value * 1000
+      : rotation_interval_unit === "minutes"
+      ? rotation_interval_value * 60 * 1000
+      : rotation_interval_unit === "hours"
+      ? rotation_interval_value * 60 * 60 * 1000
+      : rotation_interval_unit === "days"
+      ? rotation_interval_value * 24 * 60 * 60 * 1000
+      : rotation_interval_value * 60 * 60 * 1000;
 
-      const nextIndex = (current_index + 1) % thumbnail_urls.length;
-      const nextThumbnail = thumbnail_urls[nextIndex];
-      const success = await rotateThumbnail(video_id, nextThumbnail, oauth2Client);
+  const nextRun = now.plus({ milliseconds: intervalMs }).toISO();
 
-      if (success) {
-        const updateTime = now.toISO();
+  const { error: updateError } = await supabase
+    .from("ab_tests")
+    .update({
+      current_index: nextIndex,
+      last_rotation_time: now.toISO(),
+      next_run_time: nextRun,
+    })
+    .eq("id", testId);
 
-        const { error: updateError } = await supabase
-          .from("ab_tests")
-          .update({
-            current_index: nextIndex,
-            last_rotation_time: updateTime,
-          })
-          .eq("id", id);
-
-        if (updateError) {
-          console.error(`❌ Failed to update rotation state for test ${id}:`, updateError);
-        } else {
-          const nextTime = now.plus({ milliseconds: intervalMs }).toISO();
-          console.log(`✅ Rotation complete for test ${id}. Next rotation at ${nextTime}`);
-        }
-      }
-    } else {
-      console.log(
-        `⏰ Skipping test ${id} — next rotation at ${nextRotation.toISO()}`
-      );
-    }
+  if (updateError) {
+    console.error(`❌ Test update failed:`, updateError);
+  } else {
+    console.log(`✅ Test ${testId} updated. Next at ${nextRun}`);
   }
 }
 
-// -------------------------------------------------
-// 5️⃣ Schedule runner (every 1 minute)
-// -------------------------------------------------
-cron.schedule("* * * * *", async () => {
-  try {
-    await processABTests();
-  } catch (err) {
-    console.error("❌ Scheduler run failed:", err);
-  }
-});
+await runTestRotation(testId);
+process.exit(0);

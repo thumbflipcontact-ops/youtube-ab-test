@@ -6,6 +6,15 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+async function saveRefreshToken(email, refreshToken) {
+  if (!refreshToken) return; // ❗ Do NOT overwrite with undefined or null
+
+  await supabaseAdmin
+    .from("app_users")
+    .update({ refresh_token: refreshToken })
+    .eq("email", email);
+}
+
 async function refreshAccessToken(token) {
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -22,11 +31,17 @@ async function refreshAccessToken(token) {
     const refreshed = await response.json();
     if (!response.ok) throw refreshed;
 
+    // ❗ Google may return a NEW refresh token
+    const newRefreshToken = refreshed.refresh_token ?? token.refreshToken;
+
+    // ❗ Always persist refreshed tokens to DB
+    await saveRefreshToken(token.email, newRefreshToken);
+
     return {
       ...token,
       accessToken: refreshed.access_token,
       accessTokenExpires: Date.now() + refreshed.expires_in * 1000,
-      refreshToken: refreshed.refresh_token ?? token.refreshToken,
+      refreshToken: newRefreshToken,
     };
   } catch (err) {
     console.error("❌ Error refreshing token:", err);
@@ -60,41 +75,22 @@ export const authOptions = {
 
   callbacks: {
     async jwt({ token, account, user }) {
+      // FIRST LOGIN
       if (account && user) {
-        const { data: existing } = await supabaseAdmin
-          .from("app_users")
-          .select("id")
-          .eq("email", user.email)
-          .maybeSingle();
+        const refreshToken = account.refresh_token ?? token.refreshToken;
 
-        let userId;
-        if (existing) {
-          userId = existing.id;
-        } else {
-          const { data: created } = await supabaseAdmin
-            .from("app_users")
-            .insert({
-              email: user.email,
-              name: user.name,
-              image: user.image,
-              google_id: account.providerAccountId,
-              refresh_token: account.refresh_token,
-            })
-            .select("id")
-            .single();
-
-          userId = created.id;
-        }
-
-        token.userId = userId;
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        token.accessTokenExpires = Date.now() + account.expires_in * 1000;
+        // Save refresh token to DB on first login OR re-login
+        await saveRefreshToken(user.email, refreshToken);
 
         token.email = user.email;
+        token.accessToken = account.access_token;
+        token.refreshToken = refreshToken;
+        token.accessTokenExpires = Date.now() + account.expires_in * 1000;
+
         return token;
       }
 
+      // TOKEN EXPIRED → REFRESH IT
       if (Date.now() >= token.accessTokenExpires) {
         return refreshAccessToken(token);
       }
@@ -103,9 +99,7 @@ export const authOptions = {
     },
 
     async session({ session, token }) {
-      session.user.id = token.userId;
       session.user.email = token.email;
-
       session.accessToken = token.accessToken;
       session.refreshToken = token.refreshToken;
       session.error = token.error;
