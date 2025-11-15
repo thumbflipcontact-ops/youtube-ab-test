@@ -1,4 +1,6 @@
-// ⚡ Required for dynamic API behavior (cron)
+// =============================================================
+//  rotate-thumbnails/route.js  — Rotate ALL due tests
+// =============================================================
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
@@ -10,10 +12,8 @@ import { DateTime } from "luxon";
 import { supabase } from "../../../lib/supabase";
 import { getYouTubeClientForUserByEmail } from "../../../lib/youtubeClient";
 
-// Normalize secret
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim().toLowerCase();
 
-/* ------------------------- Helpers ------------------------- */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -27,21 +27,15 @@ async function uploadThumbnailSafe(youtube, videoId, imageBuffer) {
         videoId,
         media: {
           mimeType: "image/jpeg",
-          body: imageBuffer
-        }
+          body: imageBuffer,
+        },
       });
-
       return { ok: true };
     } catch (err) {
       if (err.code === 429) {
-        console.warn(
-          `⚠ Rate limit hit for ${videoId}. Retry ${attempt + 1}/${MAX_RETRIES}`
-        );
         await sleep(1500 * (attempt + 1));
         continue;
       }
-
-      console.error("❌ Fatal thumbnail upload error:", err);
       return { ok: false, fatal: true, error: err.message };
     }
   }
@@ -49,19 +43,15 @@ async function uploadThumbnailSafe(youtube, videoId, imageBuffer) {
   return { ok: false, fatal: false, reason: "rate-limit" };
 }
 
+// === Check if test has ended (but do NOT touch analytics_collected here)
 function testHasEnded(test) {
-  if (test.analytics_collected) return true;
-
-  if (test.end_datetime) {
-    const end = DateTime.fromISO(test.end_datetime).toUTC();
-    if (end < DateTime.utc()) return true;
-  }
-
-  return false;
+  if (!test.end_datetime) return false;
+  const end = DateTime.fromISO(test.end_datetime).toUTC();
+  return end <= DateTime.now().toUTC();
 }
 
-/* ------------------------- CRON ROUTE ------------------------- */
 export async function GET(req) {
+  // === Check Cron Secret
   const headerSecret = (req.headers.get("x-cron-secret") || "")
     .trim()
     .toLowerCase();
@@ -73,72 +63,63 @@ export async function GET(req) {
   try {
     console.log("🚀 CRON RUNNING — checking tests due for rotation…");
 
-    const nowUTC = DateTime.utc().toISO();
+    const nowUTC = DateTime.now().toUTC().toISO();
 
+    // =============================================================
+    //  Fetch ALL due tests — NO PER-USER LIMIT NOW
+    // =============================================================
     const { data: tests, error } = await supabase
       .from("ab_tests")
       .select("*")
       .lte("next_run_time", nowUTC)
-      .eq("analytics_collected", false);
+      .eq("analytics_collected", false); // analytics will run later by separate cron
 
     if (error) {
-      console.error("❌ Database read error:", error);
-      return NextResponse.json({ error: "Database error" }, { status: 500 });
+      console.error("❌ DB read error:", error);
+      return NextResponse.json({ message: "Database error" }, { status: 500 });
     }
 
     if (!tests || tests.length === 0) {
-      console.log("ℹ No tests ready to rotate.");
-      return NextResponse.json({ rotated: 0 });
-    }
-
-    const testsByUser = {};
-    for (const test of tests) {
-      if (!testsByUser[test.user_email]) testsByUser[test.user_email] = [];
-      testsByUser[test.user_email].push(test);
+      console.log("ℹ️ No tests due.");
+      return NextResponse.json({ success: true, rotated: 0 });
     }
 
     let totalRotations = 0;
 
-    for (const userEmail of Object.keys(testsByUser)) {
-      let userTests = testsByUser[userEmail];
-
-      // Sort by next_run_time
-      userTests.sort(
-        (a, b) =>
-          new Date(a.next_run_time || 0) - new Date(b.next_run_time || 0)
-      );
-
-      // Rotate only one test per user at a time
-      const test = userTests[0];
-
+    // =============================================================
+    //  Rotate ALL due tests (NO LIMIT)
+    // =============================================================
+    for (const test of tests) {
       const {
         id,
         video_id,
         thumbnail_urls,
         current_index,
         rotation_interval_unit,
-        rotation_interval_value
+        rotation_interval_value,
+        user_email,
       } = test;
 
       if (!thumbnail_urls || thumbnail_urls.length === 0) {
-        console.warn(`Skipping test ${id}: no thumbnails available.`);
+        console.warn(`⚠️ Test ${id}: No thumbnails, skipping.`);
         continue;
       }
 
+      // Skip ended tests
       if (testHasEnded(test)) {
-        console.log(`⏹ Test ${id} has ended; skipping.`);
+        console.log(`⏹ Test ${id} has ended, skipping.`);
         continue;
       }
 
       const nextIndex = (current_index + 1) % thumbnail_urls.length;
       const nextThumbnail = thumbnail_urls[nextIndex];
 
-      console.log(`🔄 Rotating video ${video_id} → index ${nextIndex}`);
+      console.log(`🔄 Rotating Test ${id}, Video ${video_id}`);
 
-      const { youtube } = await getYouTubeClientForUserByEmail(userEmail);
+      const { youtube } = await getYouTubeClientForUserByEmail(user_email);
 
       const img = await axios.get(nextThumbnail, {
-        responseType: "arraybuffer"
+        responseType: "arraybuffer",
       });
 
       const uploadResult = await uploadThumbnailSafe(
@@ -148,39 +129,46 @@ export async function GET(req) {
       );
 
       if (!uploadResult.ok) {
-        console.warn(
-          `⚠ Rotation failed for ${video_id}:`,
-          uploadResult.reason || uploadResult.error
-        );
+        console.warn(`⚠️ Rotation failed for test ${id}.`);
         continue;
       }
 
-      // ⭐⭐ FIX: compute next_run_time from *previous* next_run_time, not "now"
-      const nextTime = DateTime.fromISO(test.next_run_time)
+      const nextTime = DateTime.now()
+        .toUTC()
         .plus({ [rotation_interval_unit]: rotation_interval_value })
-        .toUTC();
+        .startOf("second")
+        .toISO();
 
-      await supabase
+      const updateErr = await supabase
         .from("ab_tests")
         .update({
           current_index: nextIndex,
-          last_rotation_time: DateTime.utc().toISO(),
-          next_run_time: nextTime.toISO()
+          last_rotation_time: DateTime.now().toUTC().startOf("second").toISO(),
+          next_run_time: nextTime,
         })
         .eq("id", id);
 
-      console.log(`✅ Test ${id} rotated. Next run: ${nextTime.toISO()}`);
+      if (updateErr.error) {
+        console.error(`❌ Failed updating test ${id}`, updateErr.error);
+        continue;
+      }
 
       totalRotations++;
 
-      await sleep(500);
+      await sleep(400);
     }
 
-    return NextResponse.json({ success: true, rotated: totalRotations });
-  } catch (err) {
-    console.error("❌ Unexpected CRON error:", err);
     return NextResponse.json(
-      { message: "Cron error logged", error: err.message },
+      {
+        success: true,
+        rotated: totalRotations,
+      },
+      { status: 200 }
+    );
+  } catch (err) {
+    console.error("🔥 Unexpected Cron Error:", err);
+    return NextResponse.json(
+      { message: "Server error logged", error: err.message },
       { status: 200 }
     );
   }
