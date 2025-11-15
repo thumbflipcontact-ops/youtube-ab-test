@@ -12,9 +12,8 @@ function toUTC(localDateTimeString) {
   return new Date(localDateTimeString).toISOString();
 }
 
-const router = useRouter();
-
 export default function ABTestForm({ videoId, thumbnails }) {
+  const router = useRouter();
   const { data: session } = useSession();
 
   const [startDatetime, setStartDatetime] = useState('');
