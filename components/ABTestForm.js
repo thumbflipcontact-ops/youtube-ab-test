@@ -62,7 +62,7 @@ export default function ABTestForm({ videoId, thumbnails }) {
 
       if (res.status === 200 || res.status === 201) {
         alert('✅ A/B Test Created Successfully!');
-        window.location.reload();
+        router.push('/my-tests');   // <-- redirect to summary page
       }
     } catch (err) {
       console.error(err);
