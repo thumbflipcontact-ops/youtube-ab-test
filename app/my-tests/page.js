@@ -1,5 +1,3 @@
-// app/api/my-tests/route.js
-
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const fetchCache = "force-no-store";
