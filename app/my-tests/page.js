@@ -40,17 +40,17 @@ export default function MyTestsPage() {
       ) : tests.length === 0 ? (
         <p>You haven’t created any tests yet.</p>
       ) : (
-        <div className="overflow-auto">
+        <div className="overflow-x-auto mt-6">
 
-          <table className="min-w-full border border-black border-collapse text-sm text-left">
-            <thead className="bg-gray-100">
+          <table className="min-w-full border border-slate-700 border-collapse text-sm text-left">
+            <thead className="bg-slate-800 text-white font-semibold">
               <tr>
-                <th className="px-4 py-2 border border-black">Test ID</th>
-                <th className="px-4 py-2 border border-black">Video ID</th>
-                <th className="px-4 py-2 border border-black">Start</th>
-                <th className="px-4 py-2 border border-black">End</th>
-                <th className="px-4 py-2 border border-black">Status</th>
-                <th className="px-4 py-2 border border-black">Action</th>
+                <th className="px-4 py-3 border border-slate-700">Test ID</th>
+                <th className="px-4 py-3 border border-slate-700">Video ID</th>
+                <th className="px-4 py-3 border border-slate-700">Start</th>
+                <th className="px-4 py-3 border border-slate-700">End</th>
+                <th className="px-4 py-3 border border-slate-700">Status</th>
+                <th className="px-4 py-3 border border-slate-700">Action</th>
               </tr>
             </thead>
 
@@ -63,34 +63,35 @@ export default function MyTestsPage() {
                 const isRunning = now >= start && now <= end;
 
                 return (
-                  <tr key={test.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-2 border border-black">{test.id}</td>
+                  <tr key={test.id} className={`${index % 2 === 0 ? "bg-slate-900" : "bg-slate-800"
+            } text-gray-300`}>
+                    <td className="px-4 py-2 border border-slate-700">{test.id}</td>
 
-                    <td className="px-4 py-2 border border-black font-mono text-sm text-gray-700">
+                    <td className="px-4 py-2 border border-slate-700">
                       {test.video_id}
                     </td>
 
-                    <td className="px-4 py-2 border border-black">
+                    <td className="px-4 py-2 border border-slate-700">
                       {start.toLocaleString()}
                     </td>
 
-                    <td className="px-4 py-2 border border-black">
+                    <td className="px-4 py-2 border border-slate-700">
                       {end.toLocaleString()}
                     </td>
 
-                    <td className="px-4 py-2 border border-black">
+                    <td className="px-4 py-2 border border-slate-700">
                       {isRunning ? (
-                        <span className="inline-flex items-center gap-1 text-green-700 font-medium">
+                        <span className="text-green-400 font-medium flex items-center gap-1">
                           🟢 Running
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-yellow-700 font-medium">
-                          ⏳ Awaiting / Completed
+                        <span className="text-amber-400 font-medium flex items-center gap-1">
+                          ⏳ Awaiting
                         </span>
                       )}
                     </td>
 
-                    <td className="px-4 py-2 border border-black text-gray-600 italic">
+                    <td className="px-4 py-2 border border-slate-700 italic text-gray-400">
                       Not ready
                     </td>
                   </tr>
