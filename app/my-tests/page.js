@@ -1,43 +1,33 @@
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-export const fetchCache = "force-no-store";
-export const revalidate = 0;
+'use client'
 
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../api/auth/authOptions";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
+import { useEffect, useState } from "react";
 
-// ✅ FINAL GET — Only ONE
-export async function GET() {
-  try {
-    // ✅ Authenticate user (App Router)
-    const session = await getServerSession(authOptions);
+export default function MyTestsPage() {
+  const [tests, setTests] = useState([]);
 
-    if (!session || !session.user?.email) {
-      return NextResponse.json(
-        { message: "Unauthorized" },
-        { status: 401 }
-      );
+  useEffect(() => {
+    async function load() {
+      const res = await fetch("/api/my-tests");
+      const json = await res.json();
+      setTests(json.data || []);
     }
+    load();
+  }, []);
 
-    const userEmail = session.user.email;
-
-    // ✅ Use service-role client (bypasses RLS safely)
-    const { data, error } = await supabaseAdmin
-      .from("ab_tests")
-      .select("id, video_id, start_datetime, end_datetime, analytics_collected")
-      .eq("user_email", userEmail)
-      .order("id", { ascending: false });
-
-    if (error) throw error;
-
-    return NextResponse.json({ data }, { status: 200 });
-  } catch (err) {
-    console.error("❌ Failed to fetch user tests:", err);
-    return NextResponse.json(
-      { message: err.message },
-      { status: 500 }
-    );
-  }
+  return (
+    <div>
+      <h1>Your A/B Tests</h1>
+      <ul>
+        {tests.map(t => (
+          <li key={t.id}>
+            Video: {t.video_id}  
+            <br />
+            Start: {t.start_datetime}
+            <br />
+            End: {t.end_datetime}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
