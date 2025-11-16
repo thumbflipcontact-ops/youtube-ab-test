@@ -5,8 +5,8 @@ export const revalidate = 0;
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/authOptions";
-import { supabaseAdmin } from "../../../lib/supabaseAdmin";
+import { authOptions } from "../api/auth/authOptions";
+import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
 // ✅ FINAL GET — Only ONE
 export async function GET() {
