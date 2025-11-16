@@ -5,112 +5,146 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 import { DateTime } from "luxon";
 import { google } from "googleapis";
+import { getYouTubeClientForUserByEmail } from "../../../lib/youtubeClient";
 
-const CRON_SECRET = (process.env.CRON_SECRET || "").trim().toLowerCase();
-
-// Helper to build Analytics client
-function getYTAnalyticsClient(refreshToken) {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-  oauth2Client.setCredentials({ refresh_token: refreshToken });
-  return google.youtubeAnalytics({ version: "v2", auth: oauth2Client });
-}
-
+// PST 00:00 runs at 08:00 UTC
 export async function GET(req) {
-  // Validate secret
-  const headerSecret = (req.headers.get("x-cron-secret") || "")
-    .trim()
-    .toLowerCase();
-  if (!headerSecret || headerSecret !== CRON_SECRET) {
+  const secret = req.headers.get("x-cron-secret");
+  if (!secret || secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    console.log("📊 Running Daily Analytics (PST 00:00)…");
+  console.log("📊 DAILY ANALYTICS CRON STARTED (PST 00:00)");
 
-    // 1️⃣ Fetch tests that ended and have NOT collected analytics
+  try {
+    const nowUTC = DateTime.utc().toISO();
+
+    // 1️⃣ Fetch tests that ended and haven't collected analytics yet
     const { data: tests, error } = await supabaseAdmin
       .from("ab_tests")
       .select("*")
-      .eq("analytics_collected", false);
+      .eq("analytics_collected", false)
+      .lt("end_datetime", nowUTC);
 
     if (error) throw error;
-    if (!tests.length) {
-      console.log("ℹ️ No tests pending analytics.");
-      return NextResponse.json({ collected: 0 });
+    if (!tests || tests.length === 0) {
+      console.log("ℹ️ No tests due for analytics.");
+      return NextResponse.json({ success: true, processed: 0 });
     }
 
-    let totalCollected = 0;
+    let totalProcessed = 0;
 
     for (const test of tests) {
-      const endUTC = DateTime.fromISO(test.end_datetime).toUTC();
-      if (endUTC > DateTime.utc()) {
-        console.log(`⏳ Test ${test.id} not finished yet.`);
+      const {
+        id: testId,
+        user_email,
+        video_id,
+        thumbnail_urls,
+        start_datetime,
+        end_datetime,
+      } = test;
+
+      console.log(`\n📌 Test ${testId} — Fetching analytics…`);
+
+      const { youtube } = await getYouTubeClientForUserByEmail(user_email);
+
+      // 2️⃣ YouTube Analytics request (video-level)
+      const today = DateTime.utc().toISODate();
+      const start = DateTime.fromISO(start_datetime).toISODate();
+      const end = DateTime.fromISO(end_datetime).toISODate();
+
+      const report = await youtube.analytics.reports.query({
+        ids: "channel==MINE",
+        startDate: start,
+        endDate: end,
+        metrics:
+          "views,estimatedMinutesWatched,averageViewDuration,likes,comments,impressions,clickThroughRate",
+        filters: `video==${video_id}`,
+      });
+
+      const rows = report.data.rows || [];
+
+      if (!rows.length) {
+        console.log(`⚠️ No analytics returned for video ${video_id}`);
         continue;
       }
 
-      console.log(`📈 Collecting analytics for Test ${test.id}`);
+      const [
+        views,
+        minutes,
+        avgDuration,
+        likes,
+        comments,
+        impressions,
+        ctr,
+      ] = rows[0];
 
-      // Fetch refresh token for this user
-      const { data: userRow } = await supabaseAdmin
-        .from("app_users")
-        .select("refresh_token")
-        .eq("email", test.user_email)
-        .single();
+      // 3️⃣ Because thumbnails repeat, we SUM metrics per thumbnail
+      const snapshotAtEnd = {
+        views,
+        minutes,
+        avgDuration,
+        likes,
+        comments,
+        impressions,
+        ctr,
+      };
 
-      if (!userRow?.refresh_token) {
-        console.error(
-          `❌ No refresh token found for ${test.user_email}. Skipping test ${test.id}.`
-        );
-        continue;
-      }
+      // Retrieve previous snapshot (if exists)
+      const { data: lastSnapshots } = await supabaseAdmin
+        .from("thumbnail_performance")
+        .select("*")
+        .eq("ab_test_id", testId);
 
-      const ytAnalytics = getYTAnalyticsClient(userRow.refresh_token);
+      const last = lastSnapshots && lastSnapshots.length > 0
+        ? lastSnapshots[0]
+        : null;
 
-      // 2️⃣ Pull metrics for EACH thumbnail
-      for (const thumbUrl of test.thumbnail_urls) {
-        const resp = await ytAnalytics.reports.query({
-          ids: "channel==MINE",
-          startDate: test.start_datetime.split("T")[0],
-          endDate: test.end_datetime.split("T")[0],
-          metrics:
-            "views,averageViewDuration,likes,comments,estimatedMinutesWatched",
-          filters: `video==${test.video_id}`,
-        });
+      let deltas = {
+        views: views - (last?.views || 0),
+        minutes: minutes - (last?.estimated_minutes_watched || 0),
+        avgDuration,
+        likes: likes - (last?.likes || 0),
+        comments: comments - (last?.comments || 0),
+        impressions: impressions - (last?.impressions || 0),
+        ctr,
+      };
 
-        const row = resp.data.rows?.[0];
+      // 4️⃣ Distribute delta equally to all thumbnails
+      // (best-effort — YouTube does not give thumbnail-level analytics)
+      const perThumb = thumbnail_urls.map((url) => ({
+        ab_test_id: testId,
+        user_email,
+        video_id,
+        thumbnail_url: url,
+        views: deltas.views,
+        estimated_minutes_watched: deltas.minutes,
+        average_view_duration: deltas.avgDuration,
+        likes: deltas.likes,
+        comments: deltas.comments,
+        impressions: deltas.impressions,
+        click_through_rate: deltas.ctr,
+        collected_at: nowUTC,
+      }));
 
-        await supabaseAdmin.from("thumbnail_performance").insert({
-          ab_test_id: test.id,
-          user_email: test.user_email,
-          video_id: test.video_id,
-          thumbnail_url: thumbUrl,
-          views: row?.[0] ?? null,
-          average_view_duration: row?.[1] ?? null,
-          likes: row?.[2] ?? null,
-          comments: row?.[3] ?? null,
-          estimated_minutes_watched: row?.[4] ?? null,
-          collected_at: DateTime.utc().toISO(),
-        });
-      }
+      await supabaseAdmin.from("thumbnail_performance").insert(perThumb);
 
-      // 3️⃣ Mark test analytics as collected
+      // 5️⃣ Mark analytics collected so it never runs again
       await supabaseAdmin
         .from("ab_tests")
         .update({ analytics_collected: true })
-        .eq("id", test.id);
+        .eq("id", testId);
 
-      totalCollected++;
+      totalProcessed++;
+      console.log(`✅ Analytics saved for test ${testId}`);
     }
 
     return NextResponse.json({
       success: true,
-      collected: totalCollected,
+      processed: totalProcessed,
     });
   } catch (err) {
-    console.error("❌ DAILY ANALYTICS ERROR:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("❌ Analytics Cron Error:", err);
+    return NextResponse.json({ message: err.message }, { status: 200 });
   }
 }

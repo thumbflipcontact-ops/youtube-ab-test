@@ -101,15 +101,18 @@ export default function MyTestsPage() {
                     {getStatus(test)}
                   </td>
 
-                  <td className="px-4 py-3 border border-gray-800 text-gray-400 italic">
-                    {test.analytics_collected ? (
-  <a href={`/test/${test.id}`} className="text-blue-600 underline">View Analytics</a>
-) : (
-  <span className="text-gray-500">Awaiting analytics</span>
-)}
-                  </td>
-
-
+                  <td className="border px-4 py-2">
+  {test.analytics_collected ? (
+    <button
+      onClick={() => router.push(`/test/${test.id}`)}
+      className="text-blue-600 underline"
+    >
+      View Results
+    </button>
+  ) : (
+    <span className="text-gray-500 italic">Waiting</span>
+  )}
+</td>
                 </tr>
               ))}
             </tbody>
