@@ -102,8 +102,14 @@ export default function MyTestsPage() {
                   </td>
 
                   <td className="px-4 py-3 border border-gray-800 text-gray-400 italic">
-                    Not ready
+                    {test.analytics_collected ? (
+  <a href={`/test/${test.id}`} className="text-blue-600 underline">View Analytics</a>
+) : (
+  <span className="text-gray-500">Awaiting analytics</span>
+)}
                   </td>
+
+
                 </tr>
               ))}
             </tbody>
