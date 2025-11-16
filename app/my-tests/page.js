@@ -25,6 +25,8 @@ export default function MyTestsPage() {
             Start: {t.start_datetime}
             <br />
             End: {t.end_datetime}
+            <br />
+            analytics_collected
           </li>
         ))}
       </ul>
