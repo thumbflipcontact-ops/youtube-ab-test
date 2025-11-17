@@ -1,22 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 export default function BetaLandingPage() {
   const router = useRouter();
-
-  // Prevent SSR issues
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // ❗ FIXED: Return block must use braces or parenthesis
-  if (!mounted) {
-    return <div className="text-white p-10">Loading…</div>;
-  }
 
   // Form state
   const [name, setName] = useState("");
@@ -65,6 +54,7 @@ export default function BetaLandingPage() {
 
       <div className="mt-12 w-full max-w-xl bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl p-8">
         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+          
           <div>
             <label className="block text-sm text-gray-300">Name</label>
             <input
@@ -121,6 +111,7 @@ export default function BetaLandingPage() {
             {loading ? "Submitting..." : "Request Access"}
             {!loading && <ArrowRight className="w-5 h-5" />}
           </button>
+
         </form>
       </div>
     </div>
