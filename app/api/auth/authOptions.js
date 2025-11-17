@@ -1,3 +1,4 @@
+// app/api/authOptions.js
 import GoogleProvider from "next-auth/providers/google";
 import { createClient } from "@supabase/supabase-js";
 
@@ -6,20 +7,37 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function saveRefreshToken(email, refreshToken) {
-  if (!refreshToken) return;
+// Save or update user in app_users table
+async function saveUserToDB(email, refreshToken, profile) {
+  const { name, picture, sub } = profile; // Google profile fields
 
+  // Upsert means insert or update if email already exists
   await supabaseAdmin
     .from("app_users")
     .upsert(
       {
         email,
-        refresh_token: refreshToken,
+        name: name || null,
+        image: picture || null,
+        google_id: sub || null,
+        refresh_token: refreshToken || null,
+        updated_at: new Date().toISOString(),
       },
-      {
-        onConflict: "email",
-      }
+      { onConflict: "email" }
     );
+}
+
+// Only update refresh token if it is provided
+async function saveRefreshToken(email, refreshToken) {
+  if (!refreshToken) return;
+
+  await supabaseAdmin
+    .from("app_users")
+    .update({
+      refresh_token: refreshToken,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("email", email);
 }
 
 async function refreshAccessToken(token) {
@@ -79,20 +97,22 @@ export const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
 
   callbacks: {
-    async jwt({ token, account, user }) {
+    async jwt({ token, account, user, profile }) {
+      // FIRST LOGIN OR RE-LOGIN
       if (account && user) {
         const refreshToken = account.refresh_token ?? token.refreshToken;
 
-        await saveRefreshToken(user.email, refreshToken);
+        // Save user data to DB (name, image, google_id)
+        await saveUserToDB(user.email, refreshToken, profile);
 
         token.email = user.email;
         token.accessToken = account.access_token;
         token.refreshToken = refreshToken;
         token.accessTokenExpires = Date.now() + account.expires_in * 1000;
-
         return token;
       }
 
+      // TOKEN EXPIRED → REFRESH IT
       if (Date.now() >= token.accessTokenExpires) {
         return refreshAccessToken(token);
       }
