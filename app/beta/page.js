@@ -15,31 +15,32 @@ export default function BetaLandingPage() {
   const [testimonial, setTestimonial] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+ const handleSubmit = async (e) => {
+  e.preventDefault();
+  setLoading(true);
 
-    const formData = { name, email, channel, reason, testimonial };
+  const formData = { name, email, channel, reason, testimonial };
 
-    try {
-      const res = await fetch("/api/beta-signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
+  try {
+    const res = await fetch("/api/beta-signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData),
+    });
 
-      if (res.ok) {
-        router.push("/beta/thank-you");
-      } else {
-        alert("There was an error. Please try again.");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Unexpected error. Try again.");
+    if (res.ok) {
+      router.push("/api/auth/signin");
+    } else {
+      alert("There was an error. Please try again.");
     }
+  } catch (err) {
+    console.error(err);
+    alert("Unexpected error. Try again.");
+  }
 
-    setLoading(false);
-  };
+  setLoading(false);
+};
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white px-6 flex flex-col items-center py-16">

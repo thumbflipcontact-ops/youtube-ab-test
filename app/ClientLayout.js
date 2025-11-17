@@ -5,6 +5,9 @@ import Navbar from "../components/Navbar";
 import Footer from "../components/Footer"; // ✅ import footer
 
 export default function ClientLayout({ children }) {
+// Pages that should not show Navbar/Footer
+  const noChrome = pathname.startsWith("/beta");
+
   return (
     <SessionProvider>
       <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
