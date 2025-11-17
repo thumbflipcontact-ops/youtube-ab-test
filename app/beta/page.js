@@ -29,7 +29,7 @@ export default function BetaLandingPage() {
     });
 
     if (res.ok) {
-      router.push("/api/auth/signin");
+      router.push("/beta/thank-you");
     } else {
       alert("There was an error. Please try again.");
     }
