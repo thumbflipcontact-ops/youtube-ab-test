@@ -7,12 +7,19 @@ const supabaseAdmin = createClient(
 );
 
 async function saveRefreshToken(email, refreshToken) {
-  if (!refreshToken) return; // ❗ Do NOT overwrite with undefined or null
+  if (!refreshToken) return;
 
   await supabaseAdmin
     .from("app_users")
-    .update({ refresh_token: refreshToken })
-    .eq("email", email);
+    .upsert(
+      {
+        email,
+        refresh_token: refreshToken,
+      },
+      {
+        onConflict: "email",
+      }
+    );
 }
 
 async function refreshAccessToken(token) {
@@ -31,10 +38,8 @@ async function refreshAccessToken(token) {
     const refreshed = await response.json();
     if (!response.ok) throw refreshed;
 
-    // ❗ Google may return a NEW refresh token
     const newRefreshToken = refreshed.refresh_token ?? token.refreshToken;
 
-    // ❗ Always persist refreshed tokens to DB
     await saveRefreshToken(token.email, newRefreshToken);
 
     return {
@@ -75,11 +80,9 @@ export const authOptions = {
 
   callbacks: {
     async jwt({ token, account, user }) {
-      // FIRST LOGIN
       if (account && user) {
         const refreshToken = account.refresh_token ?? token.refreshToken;
 
-        // Save refresh token to DB on first login OR re-login
         await saveRefreshToken(user.email, refreshToken);
 
         token.email = user.email;
@@ -90,7 +93,6 @@ export const authOptions = {
         return token;
       }
 
-      // TOKEN EXPIRED → REFRESH IT
       if (Date.now() >= token.accessTokenExpires) {
         return refreshAccessToken(token);
       }
