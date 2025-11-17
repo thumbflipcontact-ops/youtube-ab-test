@@ -27,7 +27,7 @@ export default function BetaLandingPage() {
     const formData = { name, email, channel, reason, testimonial };
 
     try {
-      const res = await fetch("/api/beta", {
+      const res = await fetch("/api/beta-signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
