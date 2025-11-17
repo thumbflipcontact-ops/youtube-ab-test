@@ -70,6 +70,9 @@ export default function TestResultsPage() {
                 <th className="border p-2">Comments</th>
                 <th className="border p-2">Impressions</th>
                 <th className="border p-2">Click Through Rate</th>
+                <th className="border p-2">Shares</th>
+                <th className="border p-2">Subscribers Gained</th>
+                <th className="border p-2">Average View Percentage</th>
                 <th className="border p-2">Collected At</th>
               </tr>
             </thead>
@@ -85,6 +88,9 @@ export default function TestResultsPage() {
                   <td className="border p-2 text-center">{r.comments ?? '—'}</td>
                   <td className="border p-2 text-center">{r.impressions ?? '—'}</td>
                   <td className="border p-2 text-center">{r.click_through_rate ?? '—'}</td>
+                  <td className="border p-2 text-center">{r.shares ?? '—'}</td>
+                  <td className="border p-2 text-center">{r.subscribers_gained ?? '—'}</td>
+                  <td className="border p-2 text-center">{r.average_view_percentage ?? '—'}</td>                   
                   <td className="border p-2 text-center">{r.collected_at ? new Date(r.collected_at).toLocaleString() : '—'}</td>
                 </tr>
               ))}
