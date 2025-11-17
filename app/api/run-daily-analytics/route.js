@@ -47,7 +47,7 @@ export async function GET(req) {
         await getYouTubeClientForUserByEmail(user_email);
 
       //
-      // 1️⃣ FETCH TRAFFIC-SOURCE ANALYTICS (THE ONLY REPORT THAT SUPPORTS IMPRESSIONS & CTR)
+      // 1️⃣ SAFE YOUTUBE ANALYTICS REQUEST (dimensions=day REQUIRED)
       //
       const report = await youtubeAnalytics.reports.query({
         ids: "channel==MINE",
@@ -55,7 +55,7 @@ export async function GET(req) {
         endDate: DateTime.fromISO(end_datetime).toISODate(),
         metrics:
           "views,estimatedMinutesWatched,averageViewDuration,likes,comments,impressions,clickThroughRate,shares,subscribersGained,averageViewPercentage",
-        dimensions: "day,insightTrafficSourceType",
+        dimensions: "day", // REQUIRED for impressions
         filters: `video==${video_id}`,
       });
 
@@ -65,7 +65,7 @@ export async function GET(req) {
       }
 
       //
-      // 2️⃣ AGGREGATE MULTIPLE TRAFFIC SOURCES PER DAY
+      // 2️⃣ WE SUM ACROSS DAYS
       //
       let totals = {
         views: 0,
@@ -76,19 +76,19 @@ export async function GET(req) {
         comments: 0,
 
         impressions: 0,
-        ctr_weighted_sum: 0,   // CTR must be weighted by impressions
+        ctr_weighted_sum: 0,
+
         shares: 0,
         subscribers_gained: 0,
 
-        avg_view_percentage_sum: 0,  // must be weighted by views
+        avg_view_percentage_sum: 0,
         avg_view_percentage_weight: 0
       };
 
       for (const row of report.data.rows) {
+        // row = [day, views, minutes, avgDur, likes, comments, impressions, ctr, shares, subs, avgView%]
         const [
           day,
-          trafficSource,
-
           v_views,
           v_minutes,
           v_avgDuration,
@@ -103,13 +103,13 @@ export async function GET(req) {
 
         totals.views += v_views;
         totals.minutes += v_minutes;
-        totals.avgDuration = v_avgDuration; // already an average
+        totals.avgDuration = v_avgDuration;
+
         totals.likes += v_likes;
         totals.comments += v_comments;
 
         totals.impressions += v_impressions;
 
-        // CTR weighted by impressions
         if (v_ctr != null && v_impressions > 0) {
           totals.ctr_weighted_sum += v_ctr * v_impressions;
         }
@@ -117,7 +117,6 @@ export async function GET(req) {
         totals.shares += v_shares;
         totals.subscribers_gained += v_subs;
 
-        // avg view % weighted by views
         if (v_avg_view_percentage != null && v_views > 0) {
           totals.avg_view_percentage_sum += v_avg_view_percentage * v_views;
           totals.avg_view_percentage_weight += v_views;
@@ -177,10 +176,8 @@ export async function GET(req) {
         average_view_percentage: finalAvgViewPercentage,
       };
 
-      console.log("📌 Daily Delta:", delta);
-
       //
-      // 5️⃣ FETCH THUMBNAIL ROTATION LOGS
+      // 5️⃣ THUMBNAIL ROTATION LOGS
       //
       const { data: rotations } = await supabaseAdmin
         .from("thumbnail_rotation_log")
@@ -205,7 +202,7 @@ export async function GET(req) {
       }
 
       //
-      // 6️⃣ CALCULATE WEIGHTS BY TIME
+      // 6️⃣ TIME WEIGHTING
       //
       const timeMap = {};
 
@@ -222,7 +219,7 @@ export async function GET(req) {
       if (totalHours === 0) continue;
 
       //
-      // 7️⃣ INSERT WEIGHTED ANALYTICS PER THUMBNAIL
+      // 7️⃣ INSERT PER-THUMBNAIL ANALYTICS
       //
       for (const [thumbnail, hours] of Object.entries(timeMap)) {
         const weight = hours / totalHours;
