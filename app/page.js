@@ -22,7 +22,7 @@ export default function HomePage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
       >
-        Change YouTube Thumbnails Automatically and Skyrocket Your CTR 🚀
+        A/B test upto 10 Thumbnails and Increase Your CTR 🚀
       </motion.h1>
 
       {/* Subheadline */}
@@ -32,7 +32,7 @@ export default function HomePage() {
         animate={{ opacity: 1 }}
         transition={{ delay: 0.3, duration: 0.6 }}
       >
-        Sign in with Google for free. Select a video from your YouTube channel. Upload up to 10 thumbnails per video and schedule hourly, daily or weekly rotations using <span className="text-red-400 font-semibold">ThumbFlip</span> — so you can focus on creating. Get more views, subs, and ad revenue, automatically!
+        Sign in with Google for free. Select a video from your YouTube channel. Upload up to 10 thumbnails per video and schedule hourly, daily or weekly A/B tests using <span className="text-red-400 font-semibold">ThumbFlip</span> — so you can focus on creating. Get more views, subs, and ad revenue, automatically!
       </motion.p>
 
       {/* Call to Action */}
@@ -53,7 +53,7 @@ export default function HomePage() {
         transition={{ delay: 0.6, duration: 0.5 }}
       >
         <span className="text-gray-300 text-sm md:text-base">
-          Just <span className="text-yellow-300 font-bold text-lg">$17/month</span> — grow like a pro creator.
+          Try <span className="text-yellow-300 font-bold text-lg">for Free</span> — grow like a pro creator.
         </span>
       </motion.div>
 
