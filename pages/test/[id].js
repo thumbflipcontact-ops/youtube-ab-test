@@ -78,20 +78,39 @@ export default function TestResultsPage() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="border p-2">
-                    <img src={r.thumbnail_url} alt="Thumbnail" style={{ width: 120, borderRadius: 8 }} />
+                <tr key={r.id} className="h-[110px] align-middle">
+                  
+                  {/* FIXED HEIGHT / WIDTH THUMBNAIL */}
+                  <td className="border p-2 text-center">
+                    <img
+                      src={r.thumbnail_url}
+                      alt="Thumbnail"
+                      className="w-[160px] h-[90px] object-cover rounded"
+                    />
                   </td>
+
                   <td className="border p-2 text-center">{r.views ?? '—'}</td>
                   <td className="border p-2 text-center">{r.average_view_duration ?? '—'}</td>
                   <td className="border p-2 text-center">{r.likes ?? '—'}</td>
                   <td className="border p-2 text-center">{r.comments ?? '—'}</td>
                   <td className="border p-2 text-center">{r.impressions ?? '—'}</td>
-                  <td className="border p-2 text-center">{r.click_through_rate ?? '—'}</td>
+
+                  <td className="border p-2 text-center">
+                    {r.click_through_rate ? (r.click_through_rate * 100).toFixed(2) + '%' : '—'}
+                  </td>
+
                   <td className="border p-2 text-center">{r.shares ?? '—'}</td>
                   <td className="border p-2 text-center">{r.subscribers_gained ?? '—'}</td>
-                  <td className="border p-2 text-center">{r.average_view_percentage ?? '—'}</td>                   
-                  <td className="border p-2 text-center">{r.collected_at ? new Date(r.collected_at).toLocaleString() : '—'}</td>
+
+                  <td className="border p-2 text-center">
+                    {r.average_view_percentage
+                      ? (r.average_view_percentage * 100).toFixed(2) + '%'
+                      : '—'}
+                  </td>
+
+                  <td className="border p-2 text-center">
+                    {r.collected_at ? new Date(r.collected_at).toLocaleString() : '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -99,7 +118,10 @@ export default function TestResultsPage() {
         </div>
       )}
 
-      <button onClick={() => router.push('/my-tests')} className="mt-6 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded">
+      <button
+        onClick={() => router.push('/my-tests')}
+        className="mt-6 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
+      >
         ← Back to My Tests
       </button>
     </div>
