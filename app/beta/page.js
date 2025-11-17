@@ -7,7 +7,7 @@ import { ArrowRight } from "lucide-react";
 export default function BetaLandingPage() {
   const router = useRouter();
 
-  // Prevent SSR/hydration issues
+  // Prevent SSR issues
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return <div className="text-white p-10">Loading…</div>;
@@ -24,13 +24,7 @@ export default function BetaLandingPage() {
     e.preventDefault();
     setLoading(true);
 
-    const formData = {
-      name,
-      email,
-      channel,
-      reason,
-      testimonial,
-    };
+    const formData = { name, email, channel, reason, testimonial };
 
     try {
       const res = await fetch("/api/beta", {
@@ -54,18 +48,17 @@ export default function BetaLandingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white px-6 flex flex-col items-center py-16">
-      <h1 className="text-4xl md:text-6xl font-extrabold text-center bg-clip-text text-transparent bg-gradient-to-r from-red-400 to-yellow-300 drop-shadow-lg max-w-3xl">
+      <h1 className="text-4xl md:text-6xl font-extrabold text-center bg-clip-text text-transparent bg-gradient-to-r from-red-400 to-yellow-300 max-w-3xl">
         Join the ThumbFlip Private Beta
       </h1>
 
       <p className="text-gray-300 text-center max-w-2xl mt-6 text-lg leading-relaxed">
-        Get early access to the most powerful YouTube thumbnail A/B testing
-        tool. Free during beta. Spots are limited.
+        Get early access to the most powerful YouTube thumbnail A/B testing tool.
+        Free during beta. Spots are limited.
       </p>
 
       <div className="mt-12 w-full max-w-xl bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl p-8">
         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-
           <div>
             <label className="block text-sm text-gray-300">Name</label>
             <input
@@ -103,7 +96,7 @@ export default function BetaLandingPage() {
               onChange={(e) => setReason(e.target.value)}
               required
               className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white h-28"
-            />
+            ></textarea>
           </div>
 
           <div>
@@ -112,7 +105,7 @@ export default function BetaLandingPage() {
               value={testimonial}
               onChange={(e) => setTestimonial(e.target.value)}
               className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white h-24"
-            />
+            ></textarea>
           </div>
 
           <button
