@@ -18,7 +18,7 @@ export async function GET(req) {
   try {
     const nowUTC = DateTime.utc().toISO();
 
-    // Get all tests whose analytics are not collected
+    // Fetch tests that are NOT fully collected
     const { data: tests, error } = await supabaseAdmin
       .from("ab_tests")
       .select("*")
@@ -37,18 +37,17 @@ export async function GET(req) {
         user_email,
         video_id,
         start_datetime,
-        end_datetime,
+        end_datetime
       } = test;
 
       const testEnded = DateTime.fromISO(end_datetime) < DateTime.utc();
-
       console.log(`\n📌 Processing test ${testId} (ended: ${testEnded})`);
 
       const { youtubeAnalytics } =
         await getYouTubeClientForUserByEmail(user_email);
 
       //
-      // 1️⃣ YouTube analytics query (dimension = day FIXED)
+      // 1️⃣ FETCH TRAFFIC-SOURCE ANALYTICS (THE ONLY REPORT THAT SUPPORTS IMPRESSIONS & CTR)
       //
       const report = await youtubeAnalytics.reports.query({
         ids: "channel==MINE",
@@ -56,46 +55,87 @@ export async function GET(req) {
         endDate: DateTime.fromISO(end_datetime).toISODate(),
         metrics:
           "views,estimatedMinutesWatched,averageViewDuration,likes,comments,impressions,clickThroughRate,shares,subscribersGained,averageViewPercentage",
-        dimensions: "day",
+        dimensions: "day,insightTrafficSourceType",
         filters: `video==${video_id}`,
       });
 
       if (!report.data.rows?.length) {
-        console.log("⚠️ No data returned from YouTube");
+        console.log("⚠️ No analytics returned from YouTube");
         continue;
       }
 
       //
-      // 2️⃣ Aggregate daily rows into a single cumulative total
+      // 2️⃣ AGGREGATE MULTIPLE TRAFFIC SOURCES PER DAY
       //
       let totals = {
         views: 0,
         minutes: 0,
         avgDuration: 0,
+
         likes: 0,
         comments: 0,
+
         impressions: 0,
-        ctr: 0,
+        ctr_weighted_sum: 0,   // CTR must be weighted by impressions
         shares: 0,
         subscribers_gained: 0,
-        avg_view_percentage: 0,
+
+        avg_view_percentage_sum: 0,  // must be weighted by views
+        avg_view_percentage_weight: 0
       };
 
       for (const row of report.data.rows) {
-        totals.views += row[1];
-        totals.minutes += row[2];
-        totals.avgDuration = row[3]; // averageViewDuration is already averaged
-        totals.likes += row[4];
-        totals.comments += row[5];
-        totals.impressions += row[6];
-        totals.ctr = row[7]; // CTR is averaged per day
-        totals.shares += row[8];
-        totals.subscribers_gained += row[9];
-        totals.avg_view_percentage = row[10]; // already % per day
+        const [
+          day,
+          trafficSource,
+
+          v_views,
+          v_minutes,
+          v_avgDuration,
+          v_likes,
+          v_comments,
+          v_impressions,
+          v_ctr,
+          v_shares,
+          v_subs,
+          v_avg_view_percentage
+        ] = row;
+
+        totals.views += v_views;
+        totals.minutes += v_minutes;
+        totals.avgDuration = v_avgDuration; // already an average
+        totals.likes += v_likes;
+        totals.comments += v_comments;
+
+        totals.impressions += v_impressions;
+
+        // CTR weighted by impressions
+        if (v_ctr != null && v_impressions > 0) {
+          totals.ctr_weighted_sum += v_ctr * v_impressions;
+        }
+
+        totals.shares += v_shares;
+        totals.subscribers_gained += v_subs;
+
+        // avg view % weighted by views
+        if (v_avg_view_percentage != null && v_views > 0) {
+          totals.avg_view_percentage_sum += v_avg_view_percentage * v_views;
+          totals.avg_view_percentage_weight += v_views;
+        }
       }
 
+      const finalCTR =
+        totals.impressions > 0
+          ? totals.ctr_weighted_sum / totals.impressions
+          : 0;
+
+      const finalAvgViewPercentage =
+        totals.avg_view_percentage_weight > 0
+          ? totals.avg_view_percentage_sum / totals.avg_view_percentage_weight
+          : 0;
+
       //
-      // 3️⃣ Insert raw snapshot
+      // 3️⃣ INSERT RAW SNAPSHOT
       //
       await supabaseAdmin.from("analytics_snapshots").insert({
         ab_test_id: testId,
@@ -107,15 +147,15 @@ export async function GET(req) {
         likes: totals.likes,
         comments: totals.comments,
         impressions: totals.impressions,
-        click_through_rate: totals.ctr,
+        click_through_rate: finalCTR,
         shares: totals.shares,
         subscribers_gained: totals.subscribers_gained,
-        average_view_percentage: totals.avg_view_percentage,
-        collected_at: nowUTC,
+        average_view_percentage: finalAvgViewPercentage,
+        collected_at: nowUTC
       });
 
       //
-      // 4️⃣ Pull previous snapshot to compute delta
+      // 4️⃣ GET PREVIOUS SNAPSHOT
       //
       const { data: prev } = await supabaseAdmin
         .from("analytics_snapshots")
@@ -134,13 +174,13 @@ export async function GET(req) {
         shares: totals.shares - (prev?.shares || 0),
         subscribers_gained:
           totals.subscribers_gained - (prev?.subscribers_gained || 0),
-        avg_view_percentage: totals.avg_view_percentage,
+        average_view_percentage: finalAvgViewPercentage,
       };
 
       console.log("📌 Daily Delta:", delta);
 
       //
-      // 5️⃣ Fetch rotation intervals
+      // 5️⃣ FETCH THUMBNAIL ROTATION LOGS
       //
       const { data: rotations } = await supabaseAdmin
         .from("thumbnail_rotation_log")
@@ -152,7 +192,7 @@ export async function GET(req) {
         continue;
       }
 
-      // Close active intervals (still running)
+      // Close open intervals
       for (const r of rotations) {
         if (!r.ended_at) {
           await supabaseAdmin
@@ -165,7 +205,7 @@ export async function GET(req) {
       }
 
       //
-      // 6️⃣ Time weighting per thumbnail
+      // 6️⃣ CALCULATE WEIGHTS BY TIME
       //
       const timeMap = {};
 
@@ -182,7 +222,7 @@ export async function GET(req) {
       if (totalHours === 0) continue;
 
       //
-      // 7️⃣ Insert weighted thumbnail analytics
+      // 7️⃣ INSERT WEIGHTED ANALYTICS PER THUMBNAIL
       //
       for (const [thumbnail, hours] of Object.entries(timeMap)) {
         const weight = hours / totalHours;
@@ -199,18 +239,18 @@ export async function GET(req) {
           likes: delta.likes * weight,
           comments: delta.comments * weight,
           impressions: delta.impressions * weight,
-          click_through_rate: totals.ctr,
+          click_through_rate: finalCTR,
 
           shares: delta.shares * weight,
           subscribers_gained: delta.subscribers_gained * weight,
-          average_view_percentage: totals.avg_view_percentage,
+          average_view_percentage: finalAvgViewPercentage,
 
-          collected_at: nowUTC,
+          collected_at: nowUTC
         });
       }
 
       //
-      // 8️⃣ Mark test complete if ended
+      // 8️⃣ MARK TEST COMPLETE IF ENDED
       //
       if (testEnded) {
         await supabaseAdmin
@@ -224,8 +264,9 @@ export async function GET(req) {
 
     return NextResponse.json({
       success: true,
-      processed: totalProcessed,
+      processed: totalProcessed
     });
+
   } catch (err) {
     console.error("❌ Cron Error:", err);
     return NextResponse.json({ message: err.message }, { status: 500 });
