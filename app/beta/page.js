@@ -9,8 +9,14 @@ export default function BetaLandingPage() {
 
   // Prevent SSR issues
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return <div className="text-white p-10">Loading…</div>;
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // ❗ FIXED: Return block must use braces or parenthesis
+  if (!mounted) {
+    return <div className="text-white p-10">Loading…</div>;
+  }
 
   // Form state
   const [name, setName] = useState("");
