@@ -8,7 +8,7 @@ export default function TestAnalyticsPage() {
   const { id } = useParams();
   const router = useRouter();
 
-  const [rows, setRows] = useState([]);
+  const [thumbs, setThumbs] = useState([]);
   const [testMeta, setTestMeta] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -16,12 +16,12 @@ export default function TestAnalyticsPage() {
     if (!id) return;
 
     async function load() {
-      const [analyticsRes, metaRes] = await Promise.all([
-        axios.get(`/api/analytics?testId=${id}`),
-        axios.get(`/api/my-tests`),
+      const [thumbRes, metaRes] = await Promise.all([
+        axios.get(`/api/thumbnails?testId=${id}`),
+        axios.get(`/api/my-tests`)
       ]);
 
-      setRows(analyticsRes.data.data || []);
+      setThumbs(thumbRes.data.data || []);
 
       const list = metaRes.data.data || [];
       setTestMeta(list.find((t) => t.id == id) || null);
@@ -48,8 +48,8 @@ export default function TestAnalyticsPage() {
         </div>
       )}
 
-      {!rows.length ? (
-        <p>No analytics available.</p>
+      {!thumbs.length ? (
+        <p>No analytics available yet.</p>
       ) : (
         <div className="overflow-auto">
           <table className="min-w-full border border-gray-300 text-sm">
@@ -62,23 +62,28 @@ export default function TestAnalyticsPage() {
                 <th className="border p-2">Comments</th>
                 <th className="border p-2">Impressions</th>
                 <th className="border p-2">CTR</th>
-                <th className="border p-2">Collected At</th>
+                <th className="border p-2">Last Updated</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
+              {thumbs.map((r) => (
+                <tr key={r.thumbnail_url}>
                   <td className="border p-2">
                     <img src={r.thumbnail_url} width={120} className="rounded" />
                   </td>
+
                   <td className="border p-2 text-center">{r.views}</td>
-                  <td className="border p-2 text-center">{r.average_view_duration}</td>
+                  <td className="border p-2 text-center">
+                    {r.average_view_duration.toFixed(1)} sec
+                  </td>
                   <td className="border p-2 text-center">{r.likes}</td>
                   <td className="border p-2 text-center">{r.comments}</td>
                   <td className="border p-2 text-center">{r.impressions}</td>
-                  <td className="border p-2 text-center">{r.click_through_rate}</td>
                   <td className="border p-2 text-center">
-                    {new Date(r.collected_at).toLocaleString()}
+                    {(r.click_through_rate * 100).toFixed(2)}%
+                  </td>
+                  <td className="border p-2 text-center">
+                    {new Date(r.latest_collected_at).toLocaleString()}
                   </td>
                 </tr>
               ))}

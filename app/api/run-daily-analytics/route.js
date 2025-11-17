@@ -13,16 +13,16 @@ export async function GET(req) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  console.log("📊 DAILY ANALYTICS CRON STARTED (PST 00:00)");
+  console.log("📊 DAILY ANALYTICS CRON STARTED");
 
   try {
     const nowUTC = DateTime.utc().toISO();
 
+    // Fetch tests that are NOT fully collected
     const { data: tests, error } = await supabaseAdmin
       .from("ab_tests")
       .select("*")
-      .eq("analytics_collected", false)
-      .lt("end_datetime", nowUTC);
+      .eq("analytics_collected", false);
 
     if (error) throw error;
     if (!tests?.length) {
@@ -36,17 +36,18 @@ export async function GET(req) {
         id: testId,
         user_email,
         video_id,
-        thumbnail_urls,
         start_datetime,
-        end_datetime,
+        end_datetime
       } = test;
 
-      console.log(`\n📌 Fetching analytics for test ${testId}`);
+      const testEnded = DateTime.fromISO(end_datetime) < DateTime.utc();
+
+      console.log(`\n📌 Processing test ${testId} (ended: ${testEnded})`);
 
       const { youtubeAnalytics } =
         await getYouTubeClientForUserByEmail(user_email);
 
-      // ========= IMPORTANT FIX =========
+      // 1️⃣ Get cumulative analytics
       const report = await youtubeAnalytics.reports.query({
         ids: "channel==MINE",
         startDate: DateTime.fromISO(start_datetime).toISODate(),
@@ -56,8 +57,8 @@ export async function GET(req) {
         filters: `video==${video_id}`,
       });
 
-      if (!report.data.rows || !report.data.rows.length) {
-        console.log("⚠️ No analytics returned");
+      if (!report.data.rows?.length) {
+        console.log("⚠️ No data returned");
         continue;
       }
 
@@ -68,59 +69,123 @@ export async function GET(req) {
         likes,
         comments,
         impressions,
-        ctr,
+        ctr
       ] = report.data.rows[0];
 
-      // Previous snapshot?
-      const { data: lastSnapshots } = await supabaseAdmin
-        .from("thumbnail_performance")
+      // 2️⃣ Insert raw snapshot
+      await supabaseAdmin.from("analytics_snapshots").insert({
+        ab_test_id: testId,
+        video_id,
+        user_email,
+        views,
+        estimated_minutes_watched: minutes,
+        average_view_duration: avgDuration,
+        likes,
+        comments,
+        impressions,
+        click_through_rate: ctr,
+        collected_at: nowUTC
+      });
+
+      // 3️⃣ Get previous snapshot (yesterday)
+      const { data: prev } = await supabaseAdmin
+        .from("analytics_snapshots")
+        .select("*")
+        .eq("ab_test_id", testId)
+        .lt("collected_at", nowUTC)
+        .order("collected_at", { ascending: false })
+        .limit(1);
+
+      const delta = {
+        views: views - (prev?.views || 0),
+        minutes: minutes - (prev?.estimated_minutes_watched || 0),
+        likes: likes - (prev?.likes || 0),
+        comments: comments - (prev?.comments || 0),
+        impressions: impressions - (prev?.impressions || 0),
+      };
+
+      console.log("📌 Daily Delta:", delta);
+
+      // 4️⃣ Fetch thumbnail rotation intervals
+      const { data: rotations } = await supabaseAdmin
+        .from("thumbnail_rotation_log")
         .select("*")
         .eq("ab_test_id", testId);
 
-      const last = lastSnapshots?.[0] || null;
+      if (!rotations?.length) {
+        console.log("⚠️ No rotation logs");
+        continue;
+      }
 
-      const deltas = {
-        views: views - (last?.views || 0),
-        minutes: minutes - (last?.estimated_minutes_watched || 0),
-        avgDuration,
-        likes: likes - (last?.likes || 0),
-        comments: comments - (last?.comments || 0),
-        impressions: impressions - (last?.impressions || 0),
-        ctr,
-      };
+      // Close active intervals
+      for (const r of rotations) {
+        if (!r.ended_at) {
+          await supabaseAdmin
+            .from("thumbnail_rotation_log")
+            .update({ ended_at: nowUTC })
+            .eq("id", r.id);
+          r.ended_at = nowUTC;
+        }
+      }
 
-      // Distribute across thumbnails
-      const perThumb = thumbnail_urls.map((url) => ({
-        ab_test_id: testId,
-        user_email,
-        video_id,
-        thumbnail_url: url,
-        views: deltas.views,
-        estimated_minutes_watched: deltas.minutes,
-        average_view_duration: deltas.avgDuration,
-        likes: deltas.likes,
-        comments: deltas.comments,
-        impressions: deltas.impressions,
-        click_through_rate: deltas.ctr,
-        collected_at: nowUTC,
-      }));
+      // 5️⃣ Time-weight each thumbnail
+      const timeMap = {};
 
-      await supabaseAdmin.from("thumbnail_performance").insert(perThumb);
+      for (const r of rotations) {
+        const start = DateTime.fromISO(r.started_at);
+        const end = DateTime.fromISO(r.ended_at);
+        const hours = end.diff(start, "hours").hours;
 
-      await supabaseAdmin
-        .from("ab_tests")
-        .update({ analytics_collected: true })
-        .eq("id", testId);
+        if (!timeMap[r.thumbnail_url]) timeMap[r.thumbnail_url] = 0;
+        timeMap[r.thumbnail_url] += hours;
+      }
+
+      const totalHours = Object.values(timeMap).reduce((a, b) => a + b, 0);
+
+      if (totalHours === 0) {
+        console.log("⚠️ No time intervals found");
+        continue;
+      }
+
+      // 6️⃣ Insert weighted analytics
+      for (const [thumbnail, hours] of Object.entries(timeMap)) {
+        const weight = hours / totalHours;
+
+        await supabaseAdmin.from("thumbnail_performance").insert({
+          ab_test_id: testId,
+          user_email,
+          video_id,
+          thumbnail_url: thumbnail,
+          views: delta.views * weight,
+          estimated_minutes_watched: delta.minutes * weight,
+          average_view_duration: avgDuration,
+          likes: delta.likes * weight,
+          comments: delta.comments * weight,
+          impressions: delta.impressions * weight,
+          click_through_rate: ctr,
+          collected_at: nowUTC
+        });
+      }
+
+      // 7️⃣ If the test ended, mark analytics as complete AFTER the final delta
+      if (testEnded) {
+        console.log(`✔ Test ${testId} ended — marking analytics_collected = true`);
+        await supabaseAdmin
+          .from("ab_tests")
+          .update({ analytics_collected: true })
+          .eq("id", testId);
+      }
 
       totalProcessed++;
     }
 
     return NextResponse.json({
       success: true,
-      processed: totalProcessed,
+      processed: totalProcessed
     });
+
   } catch (err) {
-    console.error("❌ Analytics Cron Error:", err);
-    return NextResponse.json({ message: err.message });
+    console.error("❌ Cron Error:", err);
+    return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
