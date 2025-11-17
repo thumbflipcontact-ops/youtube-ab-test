@@ -50,6 +50,8 @@ export default function StatsPage() {
                 <th className="px-4 py-2 text-left">Thumbnail</th>
                 <th className="px-4 py-2 text-left">Views</th>
                 <th className="px-4 py-2 text-left">Avg View Duration (s)</th>
+                <th className="px-4 py-2 text-left">Impressions</th>
+                <th className="px-4 py-2 text-left">Click Through Rate</th>
                 <th className="px-4 py-2 text-left">Collected At</th>
                 <th className="px-4 py-2 text-left">Batch</th>
               </tr>
@@ -64,6 +66,8 @@ export default function StatsPage() {
                   </td>
                   <td className="px-4 py-2">{r.views ?? '—'}</td>
                   <td className="px-4 py-2">{r.average_view_duration ?? '—'}</td>
+                  <td className="px-4 py-2">{r.impressions ?? '—'}</td>
+                  <td className="px-4 py-2">{r.click_through_rate ?? '—'}</td>
                   <td className="px-4 py-2">{r.collected_at ? new Date(r.collected_at).toLocaleString() : '—'}</td>
                   <td className="px-4 py-2">{r.batch_run_id ?? '—'}</td>
                 </tr>
