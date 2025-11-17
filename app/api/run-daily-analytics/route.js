@@ -7,6 +7,45 @@ import { DateTime } from "luxon";
 import { google } from "googleapis";
 import { getYouTubeClientForUserByEmail } from "../../../lib/youtubeClient";
 
+//
+// SAFE WRAPPER to retry analytics without impressions/CTR when YouTube rejects them
+//
+async function fetchAnalyticsSafe(youtubeAnalytics, params) {
+  try {
+    return await youtubeAnalytics.reports.query(params);
+  } catch (err) {
+    const msg = err?.message?.toLowerCase() ?? "";
+
+    const impressionsError =
+      msg.includes("impressions") ||
+      msg.includes("unknown identifier") ||
+      msg.includes("unknown metric");
+
+    if (impressionsError) {
+      console.log("⚠️ YouTube rejected impressions/CTR — retrying WITHOUT them…");
+
+      const safeMetrics = params.metrics
+        .split(",")
+        .filter(
+          (m) =>
+            m !== "impressions" &&
+            m !== "clickThroughRate" &&
+            m !== "averageViewPercentage"
+        )
+        .join(",");
+
+      const saferParams = {
+        ...params,
+        metrics: safeMetrics,
+      };
+
+      return await youtubeAnalytics.reports.query(saferParams);
+    }
+
+    throw err;
+  }
+}
+
 export async function GET(req) {
   const secret = req.headers.get("x-cron-secret");
   if (!secret || secret !== process.env.CRON_SECRET) {
@@ -18,7 +57,6 @@ export async function GET(req) {
   try {
     const nowUTC = DateTime.utc().toISO();
 
-    // Fetch tests that are NOT fully collected
     const { data: tests, error } = await supabaseAdmin
       .from("ab_tests")
       .select("*")
@@ -37,7 +75,7 @@ export async function GET(req) {
         user_email,
         video_id,
         start_datetime,
-        end_datetime
+        end_datetime,
       } = test;
 
       const testEnded = DateTime.fromISO(end_datetime) < DateTime.utc();
@@ -47,25 +85,27 @@ export async function GET(req) {
         await getYouTubeClientForUserByEmail(user_email);
 
       //
-      // 1️⃣ SAFE YOUTUBE ANALYTICS REQUEST (dimensions=day REQUIRED)
+      // 1️⃣ FETCH ANALYTICS SAFELY (handles impression errors)
       //
-      const report = await youtubeAnalytics.reports.query({
+      const params = {
         ids: "channel==MINE",
         startDate: DateTime.fromISO(start_datetime).toISODate(),
         endDate: DateTime.fromISO(end_datetime).toISODate(),
         metrics:
           "views,estimatedMinutesWatched,averageViewDuration,likes,comments,impressions,clickThroughRate,shares,subscribersGained,averageViewPercentage",
-        dimensions: "day", // REQUIRED for impressions
+        dimensions: "day",
         filters: `video==${video_id}`,
-      });
+      };
 
-      if (!report.data.rows?.length) {
-        console.log("⚠️ No analytics returned from YouTube");
+      const report = await fetchAnalyticsSafe(youtubeAnalytics, params);
+
+      if (!report?.data?.rows?.length) {
+        console.log("⚠️ YouTube returned no analytics");
         continue;
       }
 
       //
-      // 2️⃣ WE SUM ACROSS DAYS
+      // 2️⃣ AGGREGATE VALUES
       //
       let totals = {
         views: 0,
@@ -82,13 +122,13 @@ export async function GET(req) {
         subscribers_gained: 0,
 
         avg_view_percentage_sum: 0,
-        avg_view_percentage_weight: 0
+        avg_view_percentage_weight: 0,
       };
 
       for (const row of report.data.rows) {
-        // row = [day, views, minutes, avgDur, likes, comments, impressions, ctr, shares, subs, avgView%]
         const [
           day,
+
           v_views,
           v_minutes,
           v_avgDuration,
@@ -98,24 +138,24 @@ export async function GET(req) {
           v_ctr,
           v_shares,
           v_subs,
-          v_avg_view_percentage
+          v_avg_view_percentage,
         ] = row;
 
         totals.views += v_views;
         totals.minutes += v_minutes;
-        totals.avgDuration = v_avgDuration;
-
         totals.likes += v_likes;
         totals.comments += v_comments;
 
-        totals.impressions += v_impressions;
+        if (v_avgDuration != null) totals.avgDuration = v_avgDuration;
+
+        if (v_impressions != null) totals.impressions += v_impressions;
 
         if (v_ctr != null && v_impressions > 0) {
           totals.ctr_weighted_sum += v_ctr * v_impressions;
         }
 
-        totals.shares += v_shares;
-        totals.subscribers_gained += v_subs;
+        totals.shares += v_shares ?? 0;
+        totals.subscribers_gained += v_subs ?? 0;
 
         if (v_avg_view_percentage != null && v_views > 0) {
           totals.avg_view_percentage_sum += v_avg_view_percentage * v_views;
@@ -130,7 +170,8 @@ export async function GET(req) {
 
       const finalAvgViewPercentage =
         totals.avg_view_percentage_weight > 0
-          ? totals.avg_view_percentage_sum / totals.avg_view_percentage_weight
+          ? totals.avg_view_percentage_sum /
+            totals.avg_view_percentage_weight
           : 0;
 
       //
@@ -150,7 +191,7 @@ export async function GET(req) {
         shares: totals.shares,
         subscribers_gained: totals.subscribers_gained,
         average_view_percentage: finalAvgViewPercentage,
-        collected_at: nowUTC
+        collected_at: nowUTC,
       });
 
       //
@@ -176,8 +217,10 @@ export async function GET(req) {
         average_view_percentage: finalAvgViewPercentage,
       };
 
+      console.log("📌 Daily Delta:", delta);
+
       //
-      // 5️⃣ THUMBNAIL ROTATION LOGS
+      // 5️⃣ FETCH ROTATION LOG
       //
       const { data: rotations } = await supabaseAdmin
         .from("thumbnail_rotation_log")
@@ -185,7 +228,7 @@ export async function GET(req) {
         .eq("ab_test_id", testId);
 
       if (!rotations?.length) {
-        console.log("⚠️ No rotation logs");
+        console.log("⚠️ No rotation logs found");
         continue;
       }
 
@@ -202,7 +245,7 @@ export async function GET(req) {
       }
 
       //
-      // 6️⃣ TIME WEIGHTING
+      // 6️⃣ WEIGHT BY TIME ACTIVE
       //
       const timeMap = {};
 
@@ -219,7 +262,7 @@ export async function GET(req) {
       if (totalHours === 0) continue;
 
       //
-      // 7️⃣ INSERT PER-THUMBNAIL ANALYTICS
+      // 7️⃣ INSERT WEIGHTED THUMBNAIL PERFORMANCE
       //
       for (const [thumbnail, hours] of Object.entries(timeMap)) {
         const weight = hours / totalHours;
@@ -242,7 +285,7 @@ export async function GET(req) {
           subscribers_gained: delta.subscribers_gained * weight,
           average_view_percentage: finalAvgViewPercentage,
 
-          collected_at: nowUTC
+          collected_at: nowUTC,
         });
       }
 
@@ -261,9 +304,8 @@ export async function GET(req) {
 
     return NextResponse.json({
       success: true,
-      processed: totalProcessed
+      processed: totalProcessed,
     });
-
   } catch (err) {
     console.error("❌ Cron Error:", err);
     return NextResponse.json({ message: err.message }, { status: 500 });
