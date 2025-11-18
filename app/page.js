@@ -2,7 +2,7 @@
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, Check, X } from 'lucide-react'
 
 export default function HomePage() {
   const { data: session } = useSession()
