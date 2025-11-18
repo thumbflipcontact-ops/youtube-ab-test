@@ -115,7 +115,7 @@ export default function HomePage() {
         className="mt-16 w-full max-w-5xl px-4"
       >
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 to-red-400">
-          Why Creators Choose ThumbFlip Over YouTube Test & Compare
+          How ThumbFlip Outperforms YouTube's Built-in Test & Compare
         </h2>
 
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-2xl">
