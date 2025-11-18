@@ -134,7 +134,7 @@ export default function HomePage() {
             <thead className="bg-white/10">
               <tr>
                 <th className="px-6 py-4 text-sm font-semibold">Feature</th>
-                <th className="px-6 py-4 text-sm font-semibold text-blue-300">ThumbFlip</th>
+                <th className="px-6 py-4 text-sm font-semibold text-blue-400">ThumbFlip</th>
                 <th className="px-6 py-4 text-sm font-semibold text-blue-400">YouTube Test & Compare</th>
               </tr>
             </thead>
