@@ -90,54 +90,63 @@ export default function HomePage() {
       </motion.div>
 
       {/* ⭐ COMPARISON SECTION */}
-      <motion.div
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.5, duration: 0.8 }}
-        className="mt-24 w-full max-w-5xl"
-      >
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-10 bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 to-red-400">
-          Why Creators Choose ThumbFlip Over YouTube Test & Compare
-        </h2>
+<motion.div
+  initial={{ opacity: 0, y: 40 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ delay: 1.5, duration: 0.8 }}
+  className="mt-24 w-full max-w-5xl"
+>
+  <h2 className="text-3xl md:text-4xl font-bold text-center mb-10 bg-clip-text text-transparent bg-gradient-to-r from-yellow-300 to-red-400">
+    Why Creators Choose ThumbFlip Over YouTube Test & Compare
+  </h2>
 
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-2xl">
-          <table className="w-full text-left text-gray-200">
-            <thead className="bg-white/10">
-              <tr>
-                <th className="px-6 py-4 text-sm font-semibold">Feature</th>
-                <th className="px-6 py-4 text-sm font-semibold text-red-300">ThumbFlip</th>
-                <th className="px-6 py-4 text-sm font-semibold text-gray-400">YouTube Test & Compare</th>
-              </tr>
-            </thead>
-            <tbody className="backdrop-blur-xl">
-              {[
-                ["Thumbnails per test", "Up to 10", "3 max"],
-                ["Metrics tracked per thumbnail", "Views, AVD, Likes, Comments, CTR, Shares, Subs, AVP", "Watch time only"],
-                ["Test scheduling", "Hourly, Daily, Weekly", "Daily only"],
-                ["Set custom test duration", "Yes", "Fixed duration"],
-                ["Choose winning metric", "You decide", "Predefined"],
-              ].map(([feature, thumb, yt], idx) => (
-                <motion.tr
-                  key={idx}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 1.6 + idx * 0.15 }}
-                  className="border-t border-white/10 hover:bg-white/10 transition-all"
-                >
-                  <td className="px-6 py-4 text-sm">{feature}</td>
-                  <td className="px-6 py-4 text-sm flex items-center gap-2 text-green-300">
-                    <Check className="w-4 h-4 text-green-400" /> {thumb}
-                  </td>
-                  <td className="px-6 py-4 text-sm flex items-center gap-2 text-red-300">
-                    <X className="w-4 h-4 text-red-400" /> {yt}
-                  </td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+  <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl shadow-2xl">
+    <table className="w-full text-left text-gray-200">
+      <thead className="bg-white/10">
+        <tr>
+          <th className="px-6 py-4 text-sm font-semibold">Feature</th>
+          <th className="px-6 py-4 text-sm font-semibold text-red-300">ThumbFlip</th>
+          <th className="px-6 py-4 text-sm font-semibold text-gray-400">YouTube Test & Compare</th>
+        </tr>
+      </thead>
 
-        {/* Highlight Tagline */}
+      <tbody className="backdrop-blur-xl">
+        {[
+          ["Thumbnails per test", "Up to 10", "3 max"],
+          ["Metrics tracked per thumbnail", 
+            "Views, AVD, Likes, Comments, CTR, Shares, Subs, AVP",
+            "Watch time only"
+          ],
+          ["Test scheduling", "Hourly, Daily, Weekly", "Daily only"],
+          ["Set custom test duration", "Yes", "Fixed duration"],
+          ["Choose winning metric", "You decide", "Predefined"],
+        ].map(([feature, thumb, yt], idx) => (
+          <motion.tr
+            key={idx}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 1.6 + idx * 0.15 }}
+            className="border-t border-white/10 hover:bg-white/10 transition-all"
+          >
+            {/* Feature column */}
+            <td className="px-6 py-4 text-sm">{feature}</td>
+
+            {/* ThumbFlip column */}
+            <td className="px-6 py-4 text-sm flex items-center gap-2 text-green-300">
+              <Check className="w-4 h-4 text-green-400" /> {thumb}
+            </td>
+
+            {/* YouTube column */}
+            <td className="px-6 py-4 text-sm flex items-center gap-2 text-red-300">
+              <X className="w-4 h-4 text-red-400" /> {yt}
+            </td>
+          </motion.tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+         {/* Highlight Tagline */}
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
