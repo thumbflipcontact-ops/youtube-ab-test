@@ -47,6 +47,7 @@ async function fetchAnalyticsSafe(youtubeAnalytics, params) {
 }
 
 export async function GET(req) {
+console.log("🔥 NEW ANALYTICS VERSION RUNNING");   // ← ADD THIS HERE
   const secret = req.headers.get("x-cron-secret");
   if (!secret || secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
