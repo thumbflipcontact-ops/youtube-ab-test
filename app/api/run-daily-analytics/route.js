@@ -99,28 +99,52 @@ export async function GET(req) {
 
       const report = await fetchAnalyticsSafe(youtubeAnalytics, params);
 
+      //
+      // 2️⃣ IF YOUTUBE RETURNS **NO ROWS** → INSERT ZERO SNAPSHOT
+      //
       if (!report?.data?.rows?.length) {
-        console.log("⚠️ YouTube returned no analytics");
-        continue;
+        console.log("⚠️ YouTube returned NO rows — inserting ZERO snapshot");
+
+        await supabaseAdmin.from("analytics_snapshots").insert({
+          ab_test_id: testId,
+          video_id,
+          user_email,
+          views: 0,
+          estimated_minutes_watched: 0,
+          average_view_duration: 0,
+          likes: 0,
+          comments: 0,
+          impressions: 0,
+          click_through_rate: 0,
+          shares: 0,
+          subscribers_gained: 0,
+          average_view_percentage: 0,
+          collected_at: nowUTC,
+        });
+
+        if (testEnded) {
+          await supabaseAdmin
+            .from("ab_tests")
+            .update({ analytics_collected: true })
+            .eq("id", testId);
+        }
+
+        continue; // go to next test
       }
 
       //
-      // 2️⃣ AGGREGATE VALUES
+      // 3️⃣ AGGREGATE VALUES — PARTIAL FIELDS FILLED AS ZERO
       //
       let totals = {
         views: 0,
         minutes: 0,
         avgDuration: 0,
-
         likes: 0,
         comments: 0,
-
         impressions: 0,
         ctr_weighted_sum: 0,
-
         shares: 0,
         subscribers_gained: 0,
-
         avg_view_percentage_sum: 0,
         avg_view_percentage_weight: 0,
       };
@@ -128,17 +152,16 @@ export async function GET(req) {
       for (const row of report.data.rows) {
         const [
           day,
-
-          v_views,
-          v_minutes,
-          v_avgDuration,
-          v_likes,
-          v_comments,
-          v_impressions,
-          v_ctr,
-          v_shares,
-          v_subs,
-          v_avg_view_percentage,
+          v_views = 0,
+          v_minutes = 0,
+          v_avgDuration = 0,
+          v_likes = 0,
+          v_comments = 0,
+          v_impressions = 0,
+          v_ctr = 0,
+          v_shares = 0,
+          v_subs = 0,
+          v_avg_view_percentage = 0,
         ] = row;
 
         totals.views += v_views;
@@ -148,7 +171,7 @@ export async function GET(req) {
 
         if (v_avgDuration != null) totals.avgDuration = v_avgDuration;
 
-        if (v_impressions != null) totals.impressions += v_impressions;
+        totals.impressions += v_impressions ?? 0;
 
         if (v_ctr != null && v_impressions > 0) {
           totals.ctr_weighted_sum += v_ctr * v_impressions;
@@ -175,7 +198,7 @@ export async function GET(req) {
           : 0;
 
       //
-      // 3️⃣ INSERT RAW SNAPSHOT
+      // 4️⃣ INSERT RAW SNAPSHOT
       //
       await supabaseAdmin.from("analytics_snapshots").insert({
         ab_test_id: testId,
@@ -195,7 +218,7 @@ export async function GET(req) {
       });
 
       //
-      // 4️⃣ GET PREVIOUS SNAPSHOT
+      // 5️⃣ DELTA CALCULATION
       //
       const { data: prev } = await supabaseAdmin
         .from("analytics_snapshots")
@@ -217,10 +240,10 @@ export async function GET(req) {
         average_view_percentage: finalAvgViewPercentage,
       };
 
-      console.log("📌 Daily Delta:", delta);
+      console.log("📌 Delta:", delta);
 
       //
-      // 5️⃣ FETCH ROTATION LOG
+      // 6️⃣ ROTATION LOGS
       //
       const { data: rotations } = await supabaseAdmin
         .from("thumbnail_rotation_log")
@@ -229,64 +252,58 @@ export async function GET(req) {
 
       if (!rotations?.length) {
         console.log("⚠️ No rotation logs found");
-        continue;
-      }
+      } else {
+        // ensure all intervals are closed
+        for (const r of rotations) {
+          if (!r.ended_at) {
+            await supabaseAdmin
+              .from("thumbnail_rotation_log")
+              .update({ ended_at: nowUTC })
+              .eq("id", r.id);
 
-      // Close open intervals
-      for (const r of rotations) {
-        if (!r.ended_at) {
-          await supabaseAdmin
-            .from("thumbnail_rotation_log")
-            .update({ ended_at: nowUTC })
-            .eq("id", r.id);
-
-          r.ended_at = nowUTC;
+            r.ended_at = nowUTC;
+          }
         }
-      }
 
-      //
-      // 6️⃣ WEIGHT BY TIME ACTIVE
-      //
-      const timeMap = {};
+        //
+        // 7️⃣ WEIGHTED THUMBNAIL PERFORMANCE
+        //
+        const timeMap = {};
 
-      for (const r of rotations) {
-        const start = DateTime.fromISO(r.started_at);
-        const end = DateTime.fromISO(r.ended_at);
-        const hours = end.diff(start, "hours").hours;
+        for (const r of rotations) {
+          const start = DateTime.fromISO(r.started_at);
+          const end = DateTime.fromISO(r.ended_at);
+          const hours = end.diff(start, "hours").hours;
 
-        if (!timeMap[r.thumbnail_url]) timeMap[r.thumbnail_url] = 0;
-        timeMap[r.thumbnail_url] += hours;
-      }
+          if (!timeMap[r.thumbnail_url]) timeMap[r.thumbnail_url] = 0;
+          timeMap[r.thumbnail_url] += hours;
+        }
 
-      const totalHours = Object.values(timeMap).reduce((a, b) => a + b, 0);
-      if (totalHours === 0) continue;
+        const totalHours = Object.values(timeMap).reduce((a, b) => a + b, 0);
 
-      //
-      // 7️⃣ INSERT WEIGHTED THUMBNAIL PERFORMANCE
-      //
-      for (const [thumbnail, hours] of Object.entries(timeMap)) {
-        const weight = hours / totalHours;
+        if (totalHours > 0) {
+          for (const [thumbnail, hours] of Object.entries(timeMap)) {
+            const weight = hours / totalHours;
 
-        await supabaseAdmin.from("thumbnail_performance").insert({
-          ab_test_id: testId,
-          user_email,
-          video_id,
-          thumbnail_url: thumbnail,
-
-          views: delta.views * weight,
-          estimated_minutes_watched: delta.minutes * weight,
-          average_view_duration: totals.avgDuration,
-          likes: delta.likes * weight,
-          comments: delta.comments * weight,
-          impressions: delta.impressions * weight,
-          click_through_rate: finalCTR,
-
-          shares: delta.shares * weight,
-          subscribers_gained: delta.subscribers_gained * weight,
-          average_view_percentage: finalAvgViewPercentage,
-
-          collected_at: nowUTC,
-        });
+            await supabaseAdmin.from("thumbnail_performance").insert({
+              ab_test_id: testId,
+              user_email,
+              video_id,
+              thumbnail_url: thumbnail,
+              views: delta.views * weight,
+              estimated_minutes_watched: delta.minutes * weight,
+              average_view_duration: totals.avgDuration,
+              likes: delta.likes * weight,
+              comments: delta.comments * weight,
+              impressions: delta.impressions * weight,
+              click_through_rate: finalCTR,
+              shares: delta.shares * weight,
+              subscribers_gained: delta.subscribers_gained * weight,
+              average_view_percentage: finalAvgViewPercentage,
+              collected_at: nowUTC,
+            });
+          }
+        }
       }
 
       //
