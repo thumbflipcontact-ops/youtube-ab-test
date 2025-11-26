@@ -52,7 +52,6 @@ async function fetchAnalyticsSafe(youtubeAnalytics, params) {
 //
 async function readThumbnailsForTest(testId) {
   try {
-    // Try to fetch the test row and pull common thumbnail fields
     const { data: rows, error } = await supabaseAdmin
       .from("ab_tests")
       .select("*")
@@ -68,12 +67,10 @@ async function readThumbnailsForTest(testId) {
     const row = rows[0];
     const thumbnails = [];
 
-    // Common possibilities: a single JSON/array column, comma-separated string, or specific columns
     if (row.thumbnails && Array.isArray(row.thumbnails)) {
       thumbnails.push(...row.thumbnails.filter(Boolean));
     }
 
-    // sometimes it's saved as thumbnail_urls or thumbnail_urls_json
     if (row.thumbnail_urls && Array.isArray(row.thumbnail_urls)) {
       thumbnails.push(...row.thumbnail_urls.filter(Boolean));
     }
@@ -82,7 +79,6 @@ async function readThumbnailsForTest(testId) {
       thumbnails.push(row.thumbnail);
     }
 
-    // Try explicit fields thumbnail_1 ... thumbnail_10 (common pattern)
     for (let i = 1; i <= 10; i++) {
       const k = `thumbnail_${i}`;
       if (Object.prototype.hasOwnProperty.call(row, k) && row[k]) {
@@ -90,20 +86,50 @@ async function readThumbnailsForTest(testId) {
       }
     }
 
-    // Some systems store comma-separated urls in a field like thumbnails_csv
     if (row.thumbnails_csv && typeof row.thumbnails_csv === "string") {
       thumbnails.push(
         ...row.thumbnails_csv.split(",").map((s) => s.trim()).filter(Boolean)
       );
     }
 
-    // Deduplicate & filter nulls
     const uniq = Array.from(new Set(thumbnails.filter(Boolean)));
     return uniq;
   } catch (err) {
     console.error("🔥 Unexpected error reading thumbnails for test:", err);
     return [];
   }
+}
+
+async function parentExists(testId) {
+  const { data, error } = await supabaseAdmin
+    .from("ab_tests")
+    .select("id")
+    .eq("id", testId)
+    .limit(1);
+
+  if (error) {
+    console.error(`🔥 parentExists check error for ${testId}:`, error);
+    // In doubt, return false so we don't insert or mark incorrectly
+    return false;
+  }
+
+  return !!(data && data.length);
+}
+
+function parseDateFlexible(dateStr) {
+  if (!dateStr) return null;
+  let dt = DateTime.fromISO(dateStr);
+  if (!dt.isValid) {
+    // try SQL parsing (YYYY-MM-DD HH:mm:ss+ZZ) using fromSQL if available
+    try {
+      // DateTime.fromSQL exists in luxon
+      dt = DateTime.fromSQL(dateStr);
+    } catch (e) {
+      // fallback: replace space with T
+      dt = DateTime.fromISO(String(dateStr).replace(" ", "T"));
+    }
+  }
+  return dt.isValid ? dt : null;
 }
 
 export async function GET(req) {
@@ -140,34 +166,70 @@ export async function GET(req) {
         end_datetime,
       } = test;
 
-      const testEnded = DateTime.fromISO(end_datetime) < DateTime.utc();
-      console.log(`\n📌 Processing test ${testId} (ended: ${testEnded})`);
+      // re-check parent still exists (protect against deletes that happened after the initial select)
+      const existsNow = await parentExists(testId);
+      if (!existsNow) {
+        console.warn(`⛔ SKIP: ab_test ${testId} no longer exists (deleted) — skipping processing.`);
+        continue;
+      }
 
-      // get YouTube client
-      const { youtubeAnalytics } = await getYouTubeClientForUserByEmail(
-        user_email
-      );
+      // robustly parse start/end datetimes
+      const startDT = parseDateFlexible(start_datetime);
+      const endDT = parseDateFlexible(end_datetime);
+
+      const testEnded = endDT ? endDT < DateTime.utc() : false;
+      console.log(`\n📌 Processing test ${testId} (ended: ${testEnded})`);
+      console.log(`    parsed start: ${startDT ? startDT.toISO() : "INVALID"}, end: ${endDT ? endDT.toISO() : "INVALID"}`);
+
+      // get YouTube client (if this fails we'll skip gracefully)
+      let youtubeAnalytics;
+      try {
+        const client = await getYouTubeClientForUserByEmail(user_email);
+        youtubeAnalytics = client.youtubeAnalytics;
+      } catch (err) {
+        console.error(`🔥 Failed to get YouTube client for ${user_email} (test ${testId}):`, err);
+        // don't mark collected so it can be retried
+        continue;
+      }
 
       //
       // 1️⃣ FETCH ANALYTICS SAFELY (handles impression errors)
       //
       const params = {
         ids: "channel==MINE",
-        startDate: DateTime.fromISO(start_datetime).toISODate(),
-        endDate: DateTime.fromISO(end_datetime).toISODate(),
+        startDate: startDT ? startDT.toISODate() : DateTime.utc().toISODate(),
+        endDate: endDT ? endDT.toISODate() : DateTime.utc().toISODate(),
         metrics:
           "views,estimatedMinutesWatched,averageViewDuration,likes,comments,impressions,clickThroughRate,shares,subscribersGained,averageViewPercentage",
         dimensions: "day",
         filters: `video==${video_id}`,
       };
 
-      const report = await fetchAnalyticsSafe(youtubeAnalytics, params);
+      let report;
+      try {
+        report = await fetchAnalyticsSafe(youtubeAnalytics, params);
+      } catch (err) {
+        console.error(`🔥 YouTube analytics fetch failed for test ${testId}:`, err);
+        // don't mark collected; allow retry
+        continue;
+      }
+
+      //
+      // Candidate flag: did we successfully write anything for this test?
+      //
+      let wroteSomething = false;
 
       //
       // 2️⃣ IF YOUTUBE RETURNS **NO ROWS** → INSERT ZERO SNAPSHOT
       //
       if (!report?.data?.rows?.length) {
         console.log("⚠️ YouTube returned NO rows — inserting ZERO snapshot");
+
+        // ensure parent still exists before insert
+        if (!(await parentExists(testId))) {
+          console.warn(`⛔ SKIP INSERT: parent ab_tests ${testId} missing before zero-snapshot insert.`);
+          continue;
+        }
 
         const { error: insertZeroError } = await supabaseAdmin
           .from("analytics_snapshots")
@@ -192,55 +254,51 @@ export async function GET(req) {
           console.error("🔥 ZERO SNAPSHOT INSERT ERROR:", insertZeroError);
         } else {
           console.log("✅ ZERO SNAPSHOT INSERTED for test", testId);
+          wroteSomething = true;
         }
 
-        // Even if there were no rows, mark completed if the test ended
-        if (testEnded) {
-          const { error: markErr } = await supabaseAdmin
-            .from("ab_tests")
-            .update({ analytics_collected: true })
-            .eq("id", testId);
-
-          if (markErr) {
-            console.error("🔥 Error marking test analytics_collected:", markErr);
-          } else {
-            console.log("✅ Marked test as analytics_collected (no-data)", testId);
-          }
-        }
-
-        // Also insert fallback thumbnail_performance entries (Option C)
-        // get thumbnails belonging to the test (if any), otherwise insert single fallback
+        // fallback thumbnail perf rows (Option C)
         const thumbnails = await readThumbnailsForTest(testId);
 
         if (thumbnails.length === 0) {
-          // fallback single row
-          const { error: perfErr } = await supabaseAdmin
-            .from("thumbnail_performance")
-            .insert({
-              ab_test_id: testId,
-              user_email,
-              video_id,
-              thumbnail_url: null,
-              views: 0,
-              estimated_minutes_watched: 0,
-              average_view_duration: 0,
-              likes: 0,
-              comments: 0,
-              impressions: 0,
-              click_through_rate: 0,
-              shares: 0,
-              subscribers_gained: 0,
-              average_view_percentage: 0,
-              collected_at: nowUTC,
-            });
-
-          if (perfErr) {
-            console.error("🔥 FALLBACK PERF INSERT ERROR (single):", perfErr);
+          // ensure parent exists again
+          if (!(await parentExists(testId))) {
+            console.warn(`⛔ SKIP PERF INSERT: parent ab_tests ${testId} missing before fallback single perf insert.`);
           } else {
-            console.log("✅ Fallback thumbnail_performance inserted (single) for test", testId);
+            const { error: perfErr } = await supabaseAdmin
+              .from("thumbnail_performance")
+              .insert({
+                ab_test_id: testId,
+                user_email,
+                video_id,
+                thumbnail_url: null,
+                views: 0,
+                estimated_minutes_watched: 0,
+                average_view_duration: 0,
+                likes: 0,
+                comments: 0,
+                impressions: 0,
+                click_through_rate: 0,
+                shares: 0,
+                subscribers_gained: 0,
+                average_view_percentage: 0,
+                collected_at: nowUTC,
+              });
+
+            if (perfErr) {
+              console.error("🔥 FALLBACK PERF INSERT ERROR (single):", perfErr);
+            } else {
+              console.log("✅ Fallback thumbnail_performance inserted (single) for test", testId);
+              wroteSomething = true;
+            }
           }
         } else {
           for (const thumb of thumbnails) {
+            if (!(await parentExists(testId))) {
+              console.warn(`⛔ SKIP PERF INSERT: parent ab_tests ${testId} missing before fallback thumb insert for ${thumb}`);
+              break;
+            }
+
             const { error: perfErr } = await supabaseAdmin
               .from("thumbnail_performance")
               .insert({
@@ -265,7 +323,28 @@ export async function GET(req) {
               console.error("🔥 FALLBACK PERF INSERT ERROR (thumb):", thumb, perfErr);
             } else {
               console.log("✅ Fallback thumbnail_performance inserted for thumb", thumb, "test", testId);
+              wroteSomething = true;
             }
+          }
+        }
+
+        // only mark analytics_collected true if we actually wrote something AND testEnded
+        if (testEnded && wroteSomething) {
+          const { error: markErr } = await supabaseAdmin
+            .from("ab_tests")
+            .update({ analytics_collected: true })
+            .eq("id", testId);
+
+          if (markErr) {
+            console.error("🔥 Error marking test analytics_collected:", markErr);
+          } else {
+            console.log("✅ Marked test as analytics_collected (no-data)", testId);
+          }
+        } else {
+          if (!wroteSomething) {
+            console.warn(`⚠️ Did not write any snapshot/perf for test ${testId}; leaving analytics_collected=false for retry.`);
+          } else if (!testEnded) {
+            console.log(`ℹ️ Wrote zero snapshot/perf for test ${testId} but test not ended; leaving analytics_collected=false to collect again when ended.`);
           }
         }
 
@@ -339,8 +418,13 @@ export async function GET(req) {
           : 0;
 
       //
-      // 4️⃣ INSERT RAW SNAPSHOT
+      // 4️⃣ INSERT RAW SNAPSHOT (ensure parent exists first)
       //
+      if (!(await parentExists(testId))) {
+        console.warn(`⛔ SKIP SNAPSHOT INSERT: parent ab_tests ${testId} missing before snapshot insert.`);
+        continue;
+      }
+
       const { error: insertSnapshotError } = await supabaseAdmin
         .from("analytics_snapshots")
         .insert({
@@ -362,9 +446,10 @@ export async function GET(req) {
 
       if (insertSnapshotError) {
         console.error("🔥 SNAPSHOT INSERT ERROR:", insertSnapshotError);
-        // continue anyways to try to mark test end and insert fallback performance
+        // Do NOT mark analytics_collected; leave for retry
       } else {
         console.log("✅ SNAPSHOT INSERTED for test", testId);
+        wroteSomething = true;
       }
 
       //
@@ -407,35 +492,43 @@ export async function GET(req) {
         const thumbnails = await readThumbnailsForTest(testId);
 
         if (thumbnails.length === 0) {
-          // single fallback entry when no thumbnails known
-          const { error: perfErr } = await supabaseAdmin
-            .from("thumbnail_performance")
-            .insert({
-              ab_test_id: testId,
-              user_email,
-              video_id,
-              thumbnail_url: null,
-              views: delta.views,
-              estimated_minutes_watched: delta.minutes,
-              average_view_duration: totals.avgDuration,
-              likes: delta.likes,
-              comments: delta.comments,
-              impressions: delta.impressions,
-              click_through_rate: finalCTR,
-              shares: delta.shares,
-              subscribers_gained: delta.subscribers_gained,
-              average_view_percentage: finalAvgViewPercentage,
-              collected_at: nowUTC,
-            });
-
-          if (perfErr) {
-            console.error("🔥 FALLBACK PERF INSERT ERROR (single):", perfErr);
+          if (!(await parentExists(testId))) {
+            console.warn(`⛔ SKIP FALLBACK PERF INSERT: parent ab_tests ${testId} missing.`);
           } else {
-            console.log("✅ Fallback thumbnail_performance inserted (single) for test", testId);
+            const { error: perfErr } = await supabaseAdmin
+              .from("thumbnail_performance")
+              .insert({
+                ab_test_id: testId,
+                user_email,
+                video_id,
+                thumbnail_url: null,
+                views: delta.views,
+                estimated_minutes_watched: delta.minutes,
+                average_view_duration: totals.avgDuration,
+                likes: delta.likes,
+                comments: delta.comments,
+                impressions: delta.impressions,
+                click_through_rate: finalCTR,
+                shares: delta.shares,
+                subscribers_gained: delta.subscribers_gained,
+                average_view_percentage: finalAvgViewPercentage,
+                collected_at: nowUTC,
+              });
+
+            if (perfErr) {
+              console.error("🔥 FALLBACK PERF INSERT ERROR (single):", perfErr);
+            } else {
+              console.log("✅ Fallback thumbnail_performance inserted (single) for test", testId);
+              wroteSomething = true;
+            }
           }
         } else {
-          // insert one row per thumbnail with full delta (no weighting)
           for (const thumb of thumbnails) {
+            if (!(await parentExists(testId))) {
+              console.warn(`⛔ SKIP FALLBACK PER THUMB INSERT: parent ab_tests ${testId} missing before inserting thumb ${thumb}`);
+              break;
+            }
+
             const { error: perfErr } = await supabaseAdmin
               .from("thumbnail_performance")
               .insert({
@@ -460,6 +553,7 @@ export async function GET(req) {
               console.error("🔥 FALLBACK PERF INSERT ERROR (thumb):", thumb, perfErr);
             } else {
               console.log("✅ Fallback thumbnail_performance inserted for thumb", thumb, "test", testId);
+              wroteSomething = true;
             }
           }
         }
@@ -482,9 +576,9 @@ export async function GET(req) {
         const timeMap = {};
 
         for (const r of rotations) {
-          const start = DateTime.fromISO(r.started_at);
-          const end = DateTime.fromISO(r.ended_at);
-          const hours = end.diff(start, "hours").hours;
+          const start = parseDateFlexible(r.started_at) || DateTime.fromISO(r.started_at);
+          const end = parseDateFlexible(r.ended_at) || DateTime.fromISO(r.ended_at);
+          const hours = end && start ? end.diff(start, "hours").hours : 0;
 
           if (!timeMap[r.thumbnail_url]) timeMap[r.thumbnail_url] = 0;
           timeMap[r.thumbnail_url] += hours;
@@ -494,6 +588,11 @@ export async function GET(req) {
 
         if (totalHours > 0) {
           for (const [thumbnail, hours] of Object.entries(timeMap)) {
+            if (!(await parentExists(testId))) {
+              console.warn(`⛔ SKIP WEIGHTED PERF INSERT: parent ab_tests ${testId} missing before weighted insert for ${thumbnail}`);
+              break;
+            }
+
             const weight = hours / totalHours;
 
             const { error: perfErr } = await supabaseAdmin
@@ -520,41 +619,52 @@ export async function GET(req) {
               console.error("🔥 WEIGHTED PERF INSERT ERROR (thumb):", thumbnail, perfErr);
             } else {
               console.log("✅ Weighted thumbnail_performance inserted for", thumbnail, "test", testId);
+              wroteSomething = true;
             }
           }
         } else {
-          // rotations existed but totalHours == 0 (weird edge-case) → fallback to Option C behavior
+          // rotations existed but totalHours == 0 → fallback to per-thumb behavior
           console.log("⚠️ rotations exist but totalHours==0 — inserting fallback rows per thumbnail");
           const thumbnails = await readThumbnailsForTest(testId);
 
           if (thumbnails.length === 0) {
-            const { error: perfErr } = await supabaseAdmin
-              .from("thumbnail_performance")
-              .insert({
-                ab_test_id: testId,
-                user_email,
-                video_id,
-                thumbnail_url: null,
-                views: delta.views,
-                estimated_minutes_watched: delta.minutes,
-                average_view_duration: totals.avgDuration,
-                likes: delta.likes,
-                comments: delta.comments,
-                impressions: delta.impressions,
-                click_through_rate: finalCTR,
-                shares: delta.shares,
-                subscribers_gained: delta.subscribers_gained,
-                average_view_percentage: finalAvgViewPercentage,
-                collected_at: nowUTC,
-              });
-
-            if (perfErr) {
-              console.error("🔥 FALLBACK PERF INSERT ERROR (edge single):", perfErr);
+            if (!(await parentExists(testId))) {
+              console.warn(`⛔ SKIP EDGE FALLBACK PERF INSERT: parent ab_tests ${testId} missing.`);
             } else {
-              console.log("✅ Edge-case fallback performance inserted (single) for test", testId);
+              const { error: perfErr } = await supabaseAdmin
+                .from("thumbnail_performance")
+                .insert({
+                  ab_test_id: testId,
+                  user_email,
+                  video_id,
+                  thumbnail_url: null,
+                  views: delta.views,
+                  estimated_minutes_watched: delta.minutes,
+                  average_view_duration: totals.avgDuration,
+                  likes: delta.likes,
+                  comments: delta.comments,
+                  impressions: delta.impressions,
+                  click_through_rate: finalCTR,
+                  shares: delta.shares,
+                  subscribers_gained: delta.subscribers_gained,
+                  average_view_percentage: finalAvgViewPercentage,
+                  collected_at: nowUTC,
+                });
+
+              if (perfErr) {
+                console.error("🔥 FALLBACK PERF INSERT ERROR (edge single):", perfErr);
+              } else {
+                console.log("✅ Edge-case fallback performance inserted (single) for test", testId);
+                wroteSomething = true;
+              }
             }
           } else {
             for (const thumb of thumbnails) {
+              if (!(await parentExists(testId))) {
+                console.warn(`⛔ SKIP EDGE FALLBACK PER THUMB: parent ab_tests ${testId} missing before edge thumb ${thumb}`);
+                break;
+              }
+
               const { error: perfErr } = await supabaseAdmin
                 .from("thumbnail_performance")
                 .insert({
@@ -579,6 +689,7 @@ export async function GET(req) {
                 console.error("🔥 FALLBACK PERF INSERT ERROR (edge thumb):", thumb, perfErr);
               } else {
                 console.log("✅ Edge-case fallback performance inserted for thumb", thumb, "test", testId);
+                wroteSomething = true;
               }
             }
           }
@@ -586,18 +697,29 @@ export async function GET(req) {
       }
 
       //
-      // 8️⃣ MARK TEST COMPLETE IF ENDED (always mark complete)
+      // 8️⃣ MARK TEST COMPLETE ONLY IF WE WROTE SOMETHING AND TEST ENDED
       //
-      if (testEnded) {
-        const { error: markErr } = await supabaseAdmin
-          .from("ab_tests")
-          .update({ analytics_collected: true })
-          .eq("id", testId);
-
-        if (markErr) {
-          console.error("🔥 Error marking test analytics_collected:", markErr);
+      if (testEnded && wroteSomething) {
+        // ensure parent still exists
+        if (!(await parentExists(testId))) {
+          console.warn(`⛔ SKIP MARK: parent ab_tests ${testId} missing before marking analytics_collected.`);
         } else {
-          console.log("✅ Marked test as analytics_collected", testId);
+          const { error: markErr } = await supabaseAdmin
+            .from("ab_tests")
+            .update({ analytics_collected: true })
+            .eq("id", testId);
+
+          if (markErr) {
+            console.error("🔥 Error marking test analytics_collected:", markErr);
+          } else {
+            console.log("✅ Marked test as analytics_collected", testId);
+          }
+        }
+      } else {
+        if (!testEnded) {
+          console.log(`ℹ️ Test ${testId} not ended yet — leaving analytics_collected=false for future runs.`);
+        } else if (!wroteSomething) {
+          console.warn(`⚠️ Test ${testId} ended but nothing was written (inserts failed). Leaving analytics_collected=false for retry.`);
         }
       }
 
