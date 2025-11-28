@@ -135,7 +135,10 @@ function parseDateFlexible(dateStr) {
 export async function GET(req) {
   console.log("🔥 NEW ANALYTICS VERSION RUNNING");
 
-  const secret = req.headers.get("x-cron-secret");
+  // Read secret from query param: /api/run-daily-analytics?secret=xxxx
+  const url = new URL(req.url);
+  const secret = url.searchParams.get("secret");
+
   if (!secret || secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
