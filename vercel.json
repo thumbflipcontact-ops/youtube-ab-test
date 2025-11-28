@@ -2,7 +2,10 @@
   "crons": [
     {
       "path": "/api/run-daily-analytics",
-      "schedule": "0 8 * * *"
+      "schedule": "0 8 * * *",
+      "headers": {
+        "x-cron-secret": "@CRON_SECRET"
+      }
     }
   ]
 }
