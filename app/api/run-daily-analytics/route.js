@@ -124,25 +124,22 @@ function parseDateFlexible(dateStr) {
 export async function GET(req) {
   console.log("🔥 NEW ANALYTICS VERSION RUNNING");
 
-  // 1) read secret from header (Vercel Cron)
-  const headerSecret = req.headers.get("x-cron-secret");
-
-  // 2) read secret from ?secret= (manual run)
   const url = new URL(req.url);
-  const qsSecret = url.searchParams.get("secret");
 
-  const secret = headerSecret || qsSecret;
+  // Vercel Cron header
+  const headerSecret = req.headers.get("x-vercel-cron-secret");
 
-  if (!secret || secret !== process.env.CRON_SECRET) {
-    console.log("❌ Unauthorized call", {
-      headerSecret,
-      qsSecret,
-      expected: process.env.CRON_SECRET
-    });
+  // Manual trigger param
+  const querySecret = url.searchParams.get("secret");
+
+  // Use whichever exists
+  const provided = headerSecret || querySecret;
+
+  if (!provided || provided !== process.env.CRON_SECRET) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  console.log("🔐 Authorized");
+  console.log("📊 CRON AUTH SUCCESS");
 
   console.log("📊 DAILY ANALYTICS CRON STARTED");
 
