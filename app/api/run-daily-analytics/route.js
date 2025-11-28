@@ -124,11 +124,35 @@ function parseDateFlexible(dateStr) {
 export async function GET(req) {
   console.log("🔥 NEW ANALYTICS VERSION RUNNING");
 
-  // READ SECRET FROM HEADER (Vercel Cron)
-  const secret = req.headers.get("x-cron-secret");
+  // --- SECURITY LAYER FOR LEGACY VERCEL CRON ---
+  const url = new URL(req.url);
 
-  if (!secret || secret !== process.env.CRON_SECRET) {
+  // Manual testing: /api/run-daily-analytics?secret=YOUR_SECRET
+  const manualSecret = url.searchParams.get("secret");
+
+  // Vercel legacy cron IPs
+  const allowedIPs = [
+    "76.76.21.21",
+    "76.76.21.22",
+    "76.76.21.23",
+    "76.76.21.24"
+  ];
+
+  const ip =
+    req.headers.get("x-real-ip") ||
+    req.headers.get("x-forwarded-for") ||
+    "";
+
+  // Allow manual secret override
+  if (manualSecret === process.env.CRON_SECRET) {
+    console.log("🔓 Manual run accepted via ?secret=");
+  }
+  // Allow Vercel legacy cron IPs
+  else if (!allowedIPs.includes(ip)) {
+    console.log("❌ Unauthorized IP:", ip);
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } else {
+    console.log("🔐 Vercel cron IP accepted:", ip);
   }
 
   console.log("📊 DAILY ANALYTICS CRON STARTED");
