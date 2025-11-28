@@ -124,36 +124,25 @@ function parseDateFlexible(dateStr) {
 export async function GET(req) {
   console.log("🔥 NEW ANALYTICS VERSION RUNNING");
 
-  // --- SECURITY LAYER FOR LEGACY VERCEL CRON ---
+  // 1) read secret from header (Vercel Cron)
+  const headerSecret = req.headers.get("x-cron-secret");
+
+  // 2) read secret from ?secret= (manual run)
   const url = new URL(req.url);
+  const qsSecret = url.searchParams.get("secret");
 
-  // Manual testing: /api/run-daily-analytics?secret=YOUR_SECRET
-  const manualSecret = url.searchParams.get("secret");
+  const secret = headerSecret || qsSecret;
 
-  // Vercel legacy cron IPs
-  const allowedIPs = [
-    "76.76.21.21",
-    "76.76.21.22",
-    "76.76.21.23",
-    "76.76.21.24"
-  ];
-
-  const ip =
-    req.headers.get("x-real-ip") ||
-    req.headers.get("x-forwarded-for") ||
-    "";
-
-  // Allow manual secret override
-  if (manualSecret === process.env.CRON_SECRET) {
-    console.log("🔓 Manual run accepted via ?secret=");
-  }
-  // Allow Vercel legacy cron IPs
-  else if (!allowedIPs.includes(ip)) {
-    console.log("❌ Unauthorized IP:", ip);
+  if (!secret || secret !== process.env.CRON_SECRET) {
+    console.log("❌ Unauthorized call", {
+      headerSecret,
+      qsSecret,
+      expected: process.env.CRON_SECRET
+    });
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  } else {
-    console.log("🔐 Vercel cron IP accepted:", ip);
   }
+
+  console.log("🔐 Authorized");
 
   console.log("📊 DAILY ANALYTICS CRON STARTED");
 
