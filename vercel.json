@@ -1,7 +1,16 @@
 {
+  "functions": {
+    "app/api/run-daily-analytics/route.js": {
+      "invoke": {
+        "headers": {
+          "x-cron-secret": "@CRON_SECRET"
+        }
+      }
+    }
+  },
   "crons": [
     {
-      "path": "/api/run-daily-analytics?secret=@CRON_SECRET",
+      "path": "/api/run-daily-analytics",
       "schedule": "0 8 * * *"
     }
   ]
